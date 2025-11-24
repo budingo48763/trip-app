@@ -7,23 +7,23 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="長野・名古屋之旅", page_icon="🗾", layout="centered")
 
 # -------------------------------------
-# 2. 自定義 CSS (終極高對比修復版)
+# 2. 自定義 CSS (高對比 + 修正按鈕消失問題)
 # -------------------------------------
 st.markdown("""
     <style>
-    /* 1. 全局強制亮色背景與黑字 (暴力覆蓋 Streamlit 深色模式設定) */
+    /* 全局設定 */
     .stApp { 
         background-color: #FFFFFF !important; 
         color: #000000 !important;
     }
     
-    /* 隱藏原生多餘元素 */
-    .stDeployButton, header {visibility: hidden;}
-
-    /* ============================================================
-       ⚠️ 關鍵修復：輸入框標籤 (Label) 看不到的問題
-       ============================================================ */
-    /* 這是「行程標題」、「時間」、「金額」那些字 */
+    /* 
+       ⚠️ 修正 1：移除隱藏 Header 的語法 
+       現在只隱藏 Deploy 按鈕，保留右上角的 Streamlit 選單 
+    */
+    .stDeployButton {visibility: hidden;}
+    
+    /* 輸入框標籤 (Label) 修復為黑色 */
     div[data-testid="stWidgetLabel"] p {
         color: #000000 !important;
         font-weight: 900 !important;
@@ -31,15 +31,13 @@ st.markdown("""
         visibility: visible !important;
     }
     
-    /* 輸入框本體的樣式 (白底、黑字、黑框) */
+    /* 輸入框本體 (白底黑字黑框) */
     div[data-baseweb="input"], div[data-baseweb="base-input"] {
         background-color: #FFFFFF !important;
         border: 2px solid #000000 !important;
         border-radius: 8px !important;
         color: #000000 !important;
     }
-    
-    /* 輸入框裡面的文字 (使用者打的字) */
     input {
         color: #000000 !important;
         -webkit-text-fill-color: #000000 !important;
@@ -47,66 +45,48 @@ st.markdown("""
         font-weight: bold !important;
     }
 
-    /* ============================================================
-       ⚠️ 關鍵修復：上方 Day 按鈕看不到字的問題
-       ============================================================ */
-    /* 按鈕容器 */
+    /* Day 按鈕樣式 */
     div[role="radiogroup"] { gap: 10px; padding: 10px 0; }
-    div[role="radiogroup"] label > div:first-child { display: none; } /* 隱藏原本的圓點 */
+    div[role="radiogroup"] label > div:first-child { display: none; } 
 
-    /* 未選中的按鈕：白底、黑字、黑框 */
+    /* 未選中：白底黑框 */
     div[role="radiogroup"] label {
         background-color: #FFFFFF !important;
         border: 2px solid #000000 !important;
         padding: 8px 16px !important;
         border-radius: 8px !important;
     }
-    /* 強制未選中按鈕裡面的文字變黑 */
     div[role="radiogroup"] label p {
         color: #000000 !important;
         font-weight: 900 !important;
-        font-size: 1rem !important;
     }
 
-    /* 選中的按鈕：黑底、白字 */
+    /* 選中：黑底白字 */
     div[role="radiogroup"] label[data-checked="true"] {
         background-color: #000000 !important;
         border-color: #000000 !important;
     }
-    /* 強制選中按鈕裡面的文字變白 */
     div[role="radiogroup"] label[data-checked="true"] p {
         color: #FFFFFF !important;
     }
 
-    /* ============================================================
-       ⚠️ 關鍵修復：編輯模式的黑色長條 (Expander)
-       ============================================================ */
-    /* 展開區的標題列 (原本是黑底) 改為淺灰底黑字 */
+    /* 編輯區塊標題 (Expander) */
     .streamlit-expanderHeader {
         background-color: #F0F0F0 !important;
         border: 2px solid #000000 !important;
         border-radius: 8px !important;
         color: #000000 !important;
     }
-    /* 展開區標題文字 */
-    .streamlit-expanderHeader p {
-        color: #000000 !important;
-        font-weight: bold !important;
-    }
-    /* 展開後的內容區塊 */
+    .streamlit-expanderHeader p { color: #000000 !important; font-weight: bold !important; }
     .streamlit-expanderContent {
-        border-left: 2px solid #000000 !important;
-        border-right: 2px solid #000000 !important;
-        border-bottom: 2px solid #000000 !important;
+        border: 2px solid #000000 !important;
+        border-top: none !important;
         border-bottom-left-radius: 8px;
         border-bottom-right-radius: 8px;
         color: #000000 !important;
     }
 
-    /* =================================
-       UI 卡片設計
-       ================================= */
-    /* 頂部資訊卡 */
+    /* UI 卡片 */
     .header-card {
         background: white; padding: 20px 25px; border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 25px;
@@ -115,9 +95,7 @@ st.markdown("""
     .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
     .header-time { font-size: 3rem; font-weight: 900; color: #000000; line-height: 1; }
     .header-day { font-size: 1.2rem; color: #000000; margin-left: 10px; margin-top: 15px; font-weight: bold;}
-    .header-route { font-size: 1.3rem; font-weight: 900; color: #000000; margin-top: 10px; }
     
-    /* 行程卡片 */
     .timeline-wrapper { position: relative; padding-left: 10px; margin-top: 20px;}
     .timeline-line {
         position: absolute; left: 69px; top: 0; bottom: 0; width: 3px; background: #000000; z-index: 0;
@@ -137,16 +115,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------------
-# 3. 側邊欄設定
+# 3. 側邊欄設定 (保留日期設定)
 # -------------------------------------
 with st.sidebar:
-    st.title("⚙️ 行程設定")
+    st.title("⚙️ 設定")
     start_date = st.date_input("📅 出發日期", value=datetime.today())
     trip_days_count = st.number_input("🔢 旅遊天數", min_value=1, max_value=30, value=5)
-    st.divider()
-    is_edit_mode = st.toggle("✏️ 啟用編輯模式", value=False)
-    if is_edit_mode:
-        st.warning("編輯模式已開啟")
+    st.info("💡 提示：編輯按鈕已移至主畫面")
 
 # -------------------------------------
 # 4. 資料初始化
@@ -162,7 +137,6 @@ if "trip_data" not in st.session_state:
         ]
     }
 
-# 確保每一天都有資料結構
 for d in range(1, trip_days_count + 1):
     if d not in st.session_state.trip_data:
         st.session_state.trip_data[d] = []
@@ -189,24 +163,25 @@ current_items = st.session_state.trip_data[selected_day_num]
 total_cost = sum(i['cost'] for i in current_items)
 
 # Header
-header_html = f"""
+st.markdown(f"""
 <div class="header-card">
     <div class="header-top">
         <div style="display:flex;">
             <div class="header-time">{date_str}</div>
             <div class="header-day">{week_day_str}</div>
         </div>
-        <div class="weather-box">
-            <div class="weather-temp">12°</div>
-            <div class="weather-desc">舒適涼爽</div>
-        </div>
+        <div class="header-day">Day {selected_day_num}</div>
     </div>
-    <div class="header-route">行程概覽 Day {selected_day_num}</div>
 </div>
-"""
-st.markdown(header_html, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-st.markdown(f"**Day {selected_day_num} 預算統計：¥{total_cost:,}**")
+# ⚠️ 修正 2：將編輯開關移到這裡 (主畫面)，並使用 columns 排版
+col_info, col_toggle = st.columns([3, 1])
+with col_info:
+    st.markdown(f"#### 💰 當日預算：¥{total_cost:,}")
+with col_toggle:
+    # 這裡就是你的「編輯按鈕」，現在一定看得到
+    is_edit_mode = st.toggle("✏️ 編輯模式", value=False)
 
 # 新增行程按鈕
 if is_edit_mode:
@@ -238,11 +213,9 @@ for index, item in enumerate(current_items):
     
     with c3:
         if is_edit_mode:
-            # 編輯模式：使用 Expander，這次標題條已修復為淺灰底黑字
             with st.expander(f"📝 {item['title']}", expanded=True):
                 c_title, c_del = st.columns([4, 1])
                 with c_title:
-                    # 注意：這裡的 label 已經透過 CSS div[data-testid="stWidgetLabel"] 修復為黑色
                     new_title = st.text_input("行程標題", item['title'], key=f"t_{item['id']}")
                 with c_del:
                     if st.button("🗑️", key=f"del_{item['id']}", help="刪除"):
