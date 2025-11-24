@@ -7,7 +7,8 @@ import urllib.parse
 # -------------------------------------
 # 1. 系統設定
 # -------------------------------------
-st.set_page_config(page_title="旅日計畫書", page_icon="⛩️", layout="centered")
+# 設定 initial_sidebar_state="collapsed" 雖然我們稍後會用 CSS 把它完全隱藏
+st.set_page_config(page_title="旅日計畫書", page_icon="⛩️", layout="centered", initial_sidebar_state="collapsed")
 
 # ======================================================
 # Callback 函數
@@ -22,7 +23,7 @@ def add_expense_callback(item, name_key, price_key):
         st.session_state[price_key] = 0
 
 # -------------------------------------
-# 2. 日式復古風 CSS (含強制介面修正)
+# 2. 日式復古風 CSS (分頁版)
 # -------------------------------------
 st.markdown("""
     <style>
@@ -36,90 +37,83 @@ st.markdown("""
     }
 
     /* =========================================================
-       🛑 介面清理 (隱藏右上角選單、右下角按鈕、Footer)
+       🛑 徹底隱藏側邊欄與多餘介面
        ========================================================= */
     
-    /* 1. 隱藏右上角的功能區 (Deploy, Share, Three dots, GitHub) */
-    [data-testid="stHeaderActionElements"] {
-        display: none !important;
-    }
-    .stDeployButton {
-        display: none !important;
-    }
-
-    /* 2. 隱藏右下角的 "Manage app" 黑框按鈕與浮水印 */
-    footer, .stFooter {
-        display: none !important;
-    }
-    div[class*="viewerBadge"] {
+    /* 1. 隱藏側邊欄開關 (漢堡選單/箭頭) */
+    [data-testid="stSidebarCollapsedControl"] {
         display: none !important;
     }
     
-    /* 3. Header 背景透明，但保留左邊的按鈕空間 */
+    /* 2. 隱藏側邊欄本體 (防止滑動誤觸) */
+    section[data-testid="stSidebar"] {
+        display: none !important;
+        width: 0 !important;
+    }
+
+    /* 3. 隱藏右上角選單 & Footer */
+    div[data-testid="stToolbar"], div[data-testid="stDecoration"], footer {
+        visibility: hidden !important;
+        display: none !important;
+    }
     header[data-testid="stHeader"] {
         background-color: transparent !important;
-        z-index: 999999 !important;
+        height: 0 !important; /* 讓 Header 不佔空間 */
     }
 
     /* =========================================================
-       🟢 側邊欄按鈕 (箭頭) 強力美化
+       📑 分頁 (Tabs) 樣式設計 - 日式風格
        ========================================================= */
     
-    /* 針對側邊欄開關按鈕進行樣式重寫 */
-    button[data-testid="stSidebarCollapsedControl"] {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        background-color: #FFFFFF !important;  /* 白底 */
-        border: 2px solid #8E2F2F !important;  /* 紅框 */
-        border-radius: 50% !important;         /* 圓形 */
-        width: 45px !important;                /* 增大 */
-        height: 45px !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
-        margin-top: 5px !important;
-        margin-left: 5px !important;
+    /* 分頁按鈕文字 */
+    button[data-baseweb="tab"] {
+        font-family: 'Noto Serif JP', serif !important;
+        font-size: 1.1rem !important;
+        font-weight: 700 !important;
+        color: #888 !important;
+        background-color: transparent !important;
+        border-bottom: 2px solid transparent !important;
+        padding: 10px 5px !important;
     }
 
-    /* 針對按鈕裡面的 SVG 箭頭圖案變色 */
-    button[data-testid="stSidebarCollapsedControl"] svg {
-        fill: #8E2F2F !important;  /* 填充紅色 */
-        color: #8E2F2F !important; /* 線條紅色 */
-        width: 24px !important;    /* 圖示放大 */
-        height: 24px !important;
-        stroke-width: 2px !important; /* 加粗 */
+    /* 滑鼠滑過 */
+    button[data-baseweb="tab"]:hover {
+        color: #8E2F2F !important;
+        background-color: rgba(142, 47, 47, 0.05) !important;
+    }
+
+    /* 選中的分頁 (Active) */
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #8E2F2F !important;
+        border-bottom: 3px solid #8E2F2F !important; /* 紅色底線 */
+    }
+    
+    /* 隱藏預設的紅色滑動條 (我們自己用 border-bottom 做比較復古) */
+    div[data-baseweb="tab-highlight"] {
+        display: none !important;
+    }
+    
+    /* 分頁容器微調 */
+    div[data-baseweb="tab-list"] {
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #ddd;
     }
 
     /* =========================================================
-       其他樣式 (保持不變)
+       其他 UI 元件
        ========================================================= */
-    section[data-testid="stSidebar"] div[role="radiogroup"] {
-        display: flex; flex-direction: column; gap: 8px;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label {
-        width: 100% !important; height: auto !important; padding: 10px 15px !important;
-        border: none !important; border-bottom: 1px solid #ddd !important;
-        background: transparent !important; justify-content: flex-start !important;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label p {
-        font-size: 1.1rem !important; color: #555 !important; font-weight: bold !important;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
-        background-color: rgba(142, 47, 47, 0.1) !important; border-left: 5px solid #8E2F2F !important;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] p {
-        color: #8E2F2F !important;
-    }
 
-    /* Day 按鈕 */
+    /* Day 選擇按鈕 */
     .stMain div[role="radiogroup"] { 
-        gap: 12px; padding: 10px 0; justify-content: center; display: flex; flex-wrap: wrap;
+        gap: 8px; padding: 10px 0; justify-content: flex-start; display: flex; overflow-x: auto; 
     }
     .stMain div[role="radiogroup"] label > div:first-child { display: none; }
     
     .stMain div[role="radiogroup"] label {
         background-color: #FFFFFF !important;
         border: 1px solid #E0E0E0 !important;
-        width: 55px !important; height: 75px !important;
+        min-width: 50px !important; height: 70px !important;
         display: flex !important; flex-direction: column !important;
         align-items: center !important; justify-content: center !important;
         border-radius: 0px !important; box-shadow: none !important;
@@ -129,19 +123,19 @@ st.markdown("""
         font-family: 'Times New Roman', 'Noto Serif JP', serif !important;
         text-align: center !important; white-space: pre-wrap !important;
         line-height: 1.2 !important; width: 100% !important; margin: 0 !important; display: block !important;
-        font-size: 2rem !important; font-weight: 500 !important; color: #666 !important;
+        font-size: 1.8rem !important; font-weight: 500 !important; color: #666 !important;
     }
     .stMain div[role="radiogroup"] label p::first-line {
         font-size: 0.8rem !important; color: #AAA !important; font-weight: 400 !important; line-height: 2 !important;
     }
     .stMain div[role="radiogroup"] label[data-checked="true"] {
         background-color: #8E2F2F !important; border: 1px solid #8E2F2F !important;
-        box-shadow: 0 4px 10px rgba(142, 47, 47, 0.2) !important;
+        box-shadow: 0 4px 8px rgba(142, 47, 47, 0.2) !important;
     }
     .stMain div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     .stMain div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.7) !important; }
 
-    /* UI 元件微調 */
+    /* 輸入框 */
     div[data-baseweb="input"], div[data-baseweb="base-input"] {
         background-color: transparent !important; border: none !important;
         border-bottom: 2px solid #8E2F2F !important; border-radius: 0 !important;
@@ -151,13 +145,10 @@ st.markdown("""
     }
     div[data-baseweb="timepicker"] { background-color: #FFF !important; }
     
-    /* 編輯模式開關的樣式優化 */
+    /* 編輯模式 Toggle */
     div[data-testid="stToggle"] {
-        justify-content: center;
-        margin-bottom: 20px;
-        padding: 10px;
-        background: rgba(142, 47, 47, 0.05);
-        border-radius: 10px;
+        justify-content: flex-end;
+        padding: 5px;
     }
     
     /* 卡片設計 */
@@ -184,8 +175,8 @@ st.markdown("""
     .card-note { color: #666; font-size: 0.9rem; margin-top: 8px; font-style: italic; background: #F7F7F7; padding: 5px 10px; border-radius: 4px;}
     
     /* 標題樣式 */
-    .retro-title { font-size: 3rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; }
-    .retro-subtitle { font-size: 1rem; color: #888; text-align: center; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 20px; }
+    .retro-title { font-size: 2.5rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; margin-top: 10px;}
+    .retro-subtitle { font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 10px; }
     .timeline-line { position: absolute; left: 88px; top: 0; bottom: 0; width: 1px; border-left: 2px dotted #8E2F2F; z-index: 0; }
     </style>
 """, unsafe_allow_html=True)
@@ -228,31 +219,31 @@ if "checklist" not in st.session_state:
     }
 
 # -------------------------------------
-# 5. 側邊欄導航與設定
+# 5. 主畫面配置 (取代側邊欄)
 # -------------------------------------
-with st.sidebar:
-    st.title("🏮 旅日手帖")
-    page = st.radio("導航", ["📅 行程規劃", "🗺️ 路線全覽", "🎒 準備清單"], label_visibility="collapsed")
-    st.divider()
-    
-    st.markdown("### ⚙️ 設定")
+
+# 標題區
+st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
+st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
+
+# 設定區 (使用 Expander 收納)
+with st.expander("⚙️ 旅程設定 (日期/標題)"):
     st.session_state.trip_title = st.text_input("旅程標題", value=st.session_state.trip_title)
     start_date = st.date_input("出發日期", value=datetime.today())
     trip_days_count = st.number_input("旅遊天數", 1, 30, 5)
-    
-    # ⚠️ [已移除] 編輯模式按鈕從這裡移除了
 
+# 初始化日期資料
 for d in range(1, trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
-# ==========================================
-# 頁面 1: 行程規劃
-# ==========================================
-if page == "📅 行程規劃":
-    st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
+# 建立分頁
+tab1, tab2, tab3 = st.tabs(["📅 行程規劃", "🗺️ 路線全覽", "🎒 準備清單"])
 
-    # Day 選擇器
+# ==========================================
+# 分頁 1: 行程規劃
+# ==========================================
+with tab1:
+    # Day 選擇器 (橫向捲動)
     selected_day_num = st.radio(
         "DaySelect", list(range(1, trip_days_count + 1)), 
         index=0, horizontal=True, label_visibility="collapsed",
@@ -269,18 +260,14 @@ if page == "📅 行程規劃":
     
     total_cost = sum(i['cost'] for i in current_items)
     
-    # ----------------------------------------------------
-    # 🆕 新功能位置：編輯模式開關移到這裡 (中間)
-    # ----------------------------------------------------
-    st.markdown("") # 空行
+    # 日期顯示與編輯開關
     c_date, c_edit = st.columns([2, 1])
     with c_date:
         st.markdown(f"### 🗓️ {date_str} {week_str}")
     with c_edit:
-        # 這裡放置編輯模式開關
         is_edit_mode = st.toggle("✏️ 編輯", value=False)
 
-    st.markdown(f"<div style='text-align:right; color:#8E2F2F; font-weight:bold; padding-top:10px;'>本日預算 ¥{total_cost:,}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:right; color:#8E2F2F; font-weight:bold; padding-top:5px; margin-bottom:15px;'>本日預算 ¥{total_cost:,}</div>", unsafe_allow_html=True)
 
     if is_edit_mode:
         if st.button("➕ 新增行程", type="primary", use_container_width=True):
@@ -294,7 +281,7 @@ if page == "📅 行程規劃":
     current_items.sort(key=lambda x: x['time'])
     
     if not current_items:
-        st.info("🍵 請開啟上方的「✏️ 編輯」並點擊新增行程。")
+        st.info("🍵 目前無行程，請點擊上方「✏️ 編輯」開始規劃。")
 
     for index, item in enumerate(current_items):
         c_time, c_card = st.columns([1.2, 4])
@@ -305,11 +292,7 @@ if page == "📅 行程規劃":
 
         with c_card:
             if is_edit_mode:
-                # ==========================
-                # ✏️ 編輯模式
-                # ==========================
                 with st.expander(f"📝 {item['title']}", expanded=True):
-                    # 1. 基本資訊
                     c_del_btn, c_title_input = st.columns([1, 5])
                     if c_del_btn.button("🗑️", key=f"d_{item['id']}"):
                         st.session_state.trip_data[selected_day_num].pop(index)
@@ -321,17 +304,13 @@ if page == "📅 行程規劃":
                     except: t_obj = datetime.strptime("09:00", "%H:%M").time()
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
                     
-                    # 金額唯讀
                     c2.markdown(f"**💰 總金額: ¥{item['cost']:,}**")
-                    
                     item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
                     item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
 
-                    # 2. 🧾 消費明細
                     st.markdown("---")
-                    st.caption("🧾 消費明細 (自動計算總額)")
+                    st.caption("🧾 消費明細")
                     
-                    # 顯示現有明細
                     if item["expenses"]:
                         for idx, exp in enumerate(item["expenses"]):
                             ce1, ce2, ce3 = st.columns([3, 2, 1])
@@ -342,7 +321,6 @@ if page == "📅 行程規劃":
                                 item['cost'] = sum(x['price'] for x in item['expenses'])
                                 st.rerun()
 
-                    # 新增明細
                     c_add1, c_add2, c_add3 = st.columns([3, 2, 1])
                     name_key = f"new_exp_name_{item['id']}"
                     price_key = f"new_exp_price_{item['id']}"
@@ -360,7 +338,6 @@ if page == "📅 行程規劃":
                         )
 
             else:
-                # 瀏覽模式
                 w_icon, w_temp = get_mock_weather(item['loc'])
                 weather_html = f"<div class='weather-tag'><div class='w-temp'>{w_icon} {w_temp}</div></div>" if item['loc'] else ""
                 price_html = f"<div class='card-price'>¥{item['cost']:,}</div>" if item['cost'] > 0 else ""
@@ -369,7 +346,6 @@ if page == "📅 行程規劃":
                     url = f"https://www.google.com/maps/search/?api=1&query={item['loc']}"
                     loc_html = f"<div class='card-loc'>📍 <a href='{url}' target='_blank'>{item['loc']}</a></div>"
                 
-                # 備註 + 明細
                 note_content = item['note']
                 if item['expenses']:
                     exp_list_html = "<div style='margin-top:5px; padding-top:5px; border-top:1px dashed #ccc; font-size:0.85rem;'>"
@@ -396,35 +372,4 @@ if page == "📅 行程規劃":
 
     if current_items:
         st.markdown("---")
-        route_url = generate_google_map_route(current_items)
-        st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
-
-# ... (其餘頁面邏輯) ...
-elif page == "🗺️ 路線全覽":
-    st.markdown('<div class="retro-title">路線地圖</div>', unsafe_allow_html=True)
-    map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
-    map_items = st.session_state.trip_data[map_day]
-    map_items.sort(key=lambda x: x['time'])
-    if len(map_items) > 1:
-        dot = graphviz.Digraph()
-        dot.attr(rankdir='LR')
-        dot.attr('node', shape='note', style='filled', fillcolor='#FDFCF5', color='#8E2F2F', fontname='Noto Serif JP')
-        last = None
-        for item in map_items:
-            label = f"{item['time']}\n{item['loc'] or item['title']}"
-            dot.node(str(item['id']), label)
-            if last: dot.edge(last, str(item['id']), color="#8E2F2F")
-            last = str(item['id'])
-        st.graphviz_chart(dot)
-    else: st.info("行程過少，無法繪製路線。")
-
-elif page == "🎒 準備清單":
-    st.markdown('<div class="retro-title">旅の支度</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    keys = list(st.session_state.checklist.keys())
-    with c1:
-        st.markdown("##### 🛂 必要證件")
-        for k in keys[:4]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
-    with c2:
-        st.markdown("##### 🧳 生活用品")
-        for k in keys[4:]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
+        route_url = genera
