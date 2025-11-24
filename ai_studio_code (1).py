@@ -7,57 +7,104 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="長野・名古屋之旅", page_icon="🗾", layout="centered")
 
 # -------------------------------------
-# 2. 自定義 CSS (強制高對比 + 修復輸入框)
+# 2. 自定義 CSS (終極高對比修復版)
 # -------------------------------------
 st.markdown("""
     <style>
-    /* 全局強制亮色主題與黑色文字 */
+    /* 1. 全局強制亮色背景與黑字 (暴力覆蓋 Streamlit 深色模式設定) */
     .stApp { 
-        font-family: 'Helvetica Neue', Helvetica, 'Microsoft JhengHei', Arial, sans-serif; 
-        background-color: #FFFFFF; 
+        background-color: #FFFFFF !important; 
         color: #000000 !important;
     }
     
-    /* 隱藏原生元素 */
+    /* 隱藏原生多餘元素 */
     .stDeployButton, header {visibility: hidden;}
 
-    /* =================================
-       修復編輯模式看不清楚的問題 (關鍵修正)
-       ================================= */
-    /* 強制輸入框背景為白，文字為黑，邊框為深灰 */
-    div[data-baseweb="input"] {
-        background-color: #FFFFFF !important;
-        border: 2px solid #333 !important;
-        border-radius: 8px !important;
+    /* ============================================================
+       ⚠️ 關鍵修復：輸入框標籤 (Label) 看不到的問題
+       ============================================================ */
+    /* 這是「行程標題」、「時間」、「金額」那些字 */
+    div[data-testid="stWidgetLabel"] p {
+        color: #000000 !important;
+        font-weight: 900 !important;
+        font-size: 1rem !important;
+        visibility: visible !important;
     }
+    
+    /* 輸入框本體的樣式 (白底、黑字、黑框) */
+    div[data-baseweb="input"], div[data-baseweb="base-input"] {
+        background-color: #FFFFFF !important;
+        border: 2px solid #000000 !important;
+        border-radius: 8px !important;
+        color: #000000 !important;
+    }
+    
+    /* 輸入框裡面的文字 (使用者打的字) */
     input {
         color: #000000 !important;
-        caret-color: #000000 !important; /* 游標顏色 */
         -webkit-text-fill-color: #000000 !important;
+        caret-color: #000000 !important;
         font-weight: bold !important;
     }
-    /* 下拉選單與數字輸入框修正 */
-    div[data-baseweb="base-input"] { background-color: #fff !important; }
-    button[kind="secondary"] { border: 2px solid #000 !important; color: #000 !important; }
-    
-    /* Expander (展開區) 背景修正，避免深色模式影響 */
-    .streamlit-expanderHeader {
-        background-color: #f0f0f0 !important;
-        color: #000 !important;
-        border: 2px solid #000 !important;
+
+    /* ============================================================
+       ⚠️ 關鍵修復：上方 Day 按鈕看不到字的問題
+       ============================================================ */
+    /* 按鈕容器 */
+    div[role="radiogroup"] { gap: 10px; padding: 10px 0; }
+    div[role="radiogroup"] label > div:first-child { display: none; } /* 隱藏原本的圓點 */
+
+    /* 未選中的按鈕：白底、黑字、黑框 */
+    div[role="radiogroup"] label {
+        background-color: #FFFFFF !important;
+        border: 2px solid #000000 !important;
+        padding: 8px 16px !important;
         border-radius: 8px !important;
+    }
+    /* 強制未選中按鈕裡面的文字變黑 */
+    div[role="radiogroup"] label p {
+        color: #000000 !important;
+        font-weight: 900 !important;
+        font-size: 1rem !important;
+    }
+
+    /* 選中的按鈕：黑底、白字 */
+    div[role="radiogroup"] label[data-checked="true"] {
+        background-color: #000000 !important;
+        border-color: #000000 !important;
+    }
+    /* 強制選中按鈕裡面的文字變白 */
+    div[role="radiogroup"] label[data-checked="true"] p {
+        color: #FFFFFF !important;
+    }
+
+    /* ============================================================
+       ⚠️ 關鍵修復：編輯模式的黑色長條 (Expander)
+       ============================================================ */
+    /* 展開區的標題列 (原本是黑底) 改為淺灰底黑字 */
+    .streamlit-expanderHeader {
+        background-color: #F0F0F0 !important;
+        border: 2px solid #000000 !important;
+        border-radius: 8px !important;
+        color: #000000 !important;
+    }
+    /* 展開區標題文字 */
+    .streamlit-expanderHeader p {
+        color: #000000 !important;
         font-weight: bold !important;
     }
+    /* 展開後的內容區塊 */
     .streamlit-expanderContent {
-        background-color: #ffffff !important;
-        border-left: 2px solid #000 !important;
-        border-right: 2px solid #000 !important;
-        border-bottom: 2px solid #000 !important;
-        color: #000 !important;
+        border-left: 2px solid #000000 !important;
+        border-right: 2px solid #000000 !important;
+        border-bottom: 2px solid #000000 !important;
+        border-bottom-left-radius: 8px;
+        border-bottom-right-radius: 8px;
+        color: #000000 !important;
     }
 
     /* =================================
-       UI 元件樣式
+       UI 卡片設計
        ================================= */
     /* 頂部資訊卡 */
     .header-card {
@@ -70,19 +117,7 @@ st.markdown("""
     .header-day { font-size: 1.2rem; color: #000000; margin-left: 10px; margin-top: 15px; font-weight: bold;}
     .header-route { font-size: 1.3rem; font-weight: 900; color: #000000; margin-top: 10px; }
     
-    /* Day 按鈕樣式 */
-    div[role="radiogroup"] { gap: 8px; overflow-x: auto; padding-bottom: 5px; }
-    div[role="radiogroup"] label > div:first-child { display: none; }
-    div[role="radiogroup"] label {
-        background: white !important; border: 2px solid #000000 !important; 
-        padding: 6px 14px !important; border-radius: 10px !important;
-        color: #000000 !important; font-weight: bold !important;
-    }
-    div[role="radiogroup"] label[data-checked="true"] {
-        background: #000000 !important; color: white !important;
-    }
-
-    /* 時間軸與卡片 */
+    /* 行程卡片 */
     .timeline-wrapper { position: relative; padding-left: 10px; margin-top: 20px;}
     .timeline-line {
         position: absolute; left: 69px; top: 0; bottom: 0; width: 3px; background: #000000; z-index: 0;
@@ -102,28 +137,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------------
-# 3. 側邊欄設定 (日期、天數、編輯模式)
+# 3. 側邊欄設定
 # -------------------------------------
 with st.sidebar:
     st.title("⚙️ 行程設定")
-    
-    # 設定 1: 出發日期
     start_date = st.date_input("📅 出發日期", value=datetime.today())
-    
-    # 設定 2: 旅遊天數 (動態調整)
     trip_days_count = st.number_input("🔢 旅遊天數", min_value=1, max_value=30, value=5)
-    
     st.divider()
-    
-    # 設定 3: 編輯模式 (改用明顯的 Toggle)
     is_edit_mode = st.toggle("✏️ 啟用編輯模式", value=False)
     if is_edit_mode:
-        st.warning("編輯模式已開啟，可修改行程")
-    else:
-        st.success("目前為瀏覽模式")
+        st.warning("編輯模式已開啟")
 
 # -------------------------------------
-# 4. 資料初始化 (自動補齊天數)
+# 4. 資料初始化
 # -------------------------------------
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
@@ -133,8 +159,6 @@ if "trip_data" not in st.session_state:
             {"id": 202, "time": "08:00", "title": "移動：名古屋 → 上諏訪", "loc": "JR 特急 (信濃號)", "cost": 0, "cat": "trans", "note": "指定席"},
             {"id": 203, "time": "10:30", "title": "放行李", "loc": "ホテル紅や", "cost": 0, "cat": "stay", "note": "寄放行李"},
             {"id": 204, "time": "11:30", "title": "午餐：鰻魚飯", "loc": "ねばし (古名店)", "cost": 2000, "cat": "food", "note": "排隊美食"},
-            {"id": 205, "time": "13:30", "title": "高島城跡", "loc": "高島城", "cost": 0, "cat": "play", "note": "散步拍照"},
-            {"id": 206, "time": "18:00", "title": "晚餐", "loc": "Izumiya", "cost": 1500, "cat": "food", "note": ""},
         ]
     }
 
@@ -146,27 +170,25 @@ for d in range(1, trip_days_count + 1):
 # -------------------------------------
 # 5. 主畫面渲染
 # -------------------------------------
-
-# 動態產生 Day 選項
 day_options = list(range(1, trip_days_count + 1))
 selected_day_num = st.radio(
     "選擇天數", day_options, 
-    index=1 if trip_days_count >=2 else 0, # 預設選第二天，除非只有一天
+    index=1 if trip_days_count >=2 else 0,
     format_func=lambda x: f"Day {x}", 
     horizontal=True,
     label_visibility="collapsed"
 )
 
-# 計算當前日期資訊
+# 日期計算
 current_date_obj = start_date + timedelta(days=selected_day_num - 1)
-date_str = current_date_obj.strftime("%m/%d") # 格式：11/24
+date_str = current_date_obj.strftime("%m/%d")
 week_days_ch = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"]
 week_day_str = week_days_ch[int(current_date_obj.strftime("%w"))]
 
 current_items = st.session_state.trip_data[selected_day_num]
 total_cost = sum(i['cost'] for i in current_items)
 
-# Header HTML (動態日期)
+# Header
 header_html = f"""
 <div class="header-card">
     <div class="header-top">
@@ -184,10 +206,9 @@ header_html = f"""
 """
 st.markdown(header_html, unsafe_allow_html=True)
 
-# 資訊列
 st.markdown(f"**Day {selected_day_num} 預算統計：¥{total_cost:,}**")
 
-# 新增行程按鈕 (僅編輯模式顯示)
+# 新增行程按鈕
 if is_edit_mode:
     if st.button("➕ 新增一筆行程", type="primary", use_container_width=True):
         new_id = int(datetime.now().timestamp())
@@ -196,7 +217,6 @@ if is_edit_mode:
         })
         st.rerun()
 
-# 分類顏色
 cat_colors = {"food": "#FF6B6B", "trans": "#4ECDC4", "stay": "#5E548E", "play": "#FFD93D", "other": "#95A5A6"}
 
 st.markdown('<div class="timeline-wrapper"><div class="timeline-line"></div>', unsafe_allow_html=True)
@@ -204,7 +224,6 @@ st.markdown('<div class="timeline-wrapper"><div class="timeline-line"></div>', u
 if not current_items:
     st.info("😴 今天尚未安排行程")
 
-# 排序
 current_items.sort(key=lambda x: x['time'])
 
 for index, item in enumerate(current_items):
@@ -219,10 +238,11 @@ for index, item in enumerate(current_items):
     
     with c3:
         if is_edit_mode:
-            # 編輯模式：樣式已透過 CSS 強制修復為白底黑字
+            # 編輯模式：使用 Expander，這次標題條已修復為淺灰底黑字
             with st.expander(f"📝 {item['title']}", expanded=True):
                 c_title, c_del = st.columns([4, 1])
                 with c_title:
+                    # 注意：這裡的 label 已經透過 CSS div[data-testid="stWidgetLabel"] 修復為黑色
                     new_title = st.text_input("行程標題", item['title'], key=f"t_{item['id']}")
                 with c_del:
                     if st.button("🗑️", key=f"del_{item['id']}", help="刪除"):
@@ -234,9 +254,8 @@ for index, item in enumerate(current_items):
                 item['cost'] = c_b.number_input("金額 (¥)", value=item['cost'], step=100, key=f"c_{item['id']}")
                 item['loc'] = st.text_input("地點 (Google Maps)", item['loc'], key=f"l_{item['id']}")
                 item['note'] = st.text_input("備註", item['note'], key=f"n_{item['id']}")
-                item['title'] = new_title # 更新標題
+                item['title'] = new_title
         else:
-            # 瀏覽模式
             border_color = cat_colors.get(item.get("cat", "other"), "#000")
             price_html = f'<div class="card-price">¥{item["cost"]:,}</div>' if item["cost"] > 0 else ""
             loc_link = f'https://www.google.com/maps/search/?api=1&query={item["loc"]}'
