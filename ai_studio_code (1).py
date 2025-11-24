@@ -41,49 +41,60 @@ st.markdown("""
         font-family: 'Noto Serif JP', 'Times New Roman', serif !important;
     }
     
-    /* === 🛠️ 第三次修復：最保險的寫法 === */
+    /* =========================================
+       🚀 手機側邊欄按鈕：高顯眼修復版
+       ========================================= */
     
-    /* 1. 絕對不要隱藏 header，改為背景透明 */
-    header {
+    /* 1. 確保 Header 區域可見，但背景透明 */
+    header[data-testid="stHeader"] {
         visibility: visible !important;
         background-color: transparent !important;
+        z-index: 999999 !important;
     }
 
-    /* 2. 隱藏頂部的彩虹裝飾條 (Streamlit 預設的那條) */
+    /* 2. 隱藏不必要的元素 (Deploy 按鈕、彩虹條) */
+    .stDeployButton, 
     div[data-testid="stDecoration"] {
-        display: none !important;
-    }
-
-    /* 3. 只隱藏 Deploy (火箭/部署) 按鈕 */
-    .stDeployButton {
         display: none !important;
         visibility: hidden !important;
     }
 
-    /* 4. 強制顯示功能列 (漢堡選單就在這裡面) */
-    div[data-testid="stToolbar"] {
+    /* 3. 【關鍵】改造側邊欄開關按鈕 (讓它變大、變紅、變圓) */
+    button[data-testid="stSidebarCollapsedControl"] {
         visibility: visible !important;
-        display: block !important;
-        right: 0 !important;
-        left: auto !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        
+        /* 外觀設計：日式印章感 */
+        background-color: #FFFFFF !important;   /* 白底 */
+        border: 2px solid #8E2F2F !important;   /* 深紅框 */
+        border-radius: 50% !important;          /* 圓形 */
+        color: #8E2F2F !important;              /* 箭頭顏色 */
+        
+        /* 尺寸放大 */
+        width: 48px !important;
+        height: 48px !important;
+        margin-left: 10px !important;           /* 離左邊稍微遠一點 */
+        margin-top: 5px !important;
+        
+        /* 加陰影讓它浮起來 */
+        box-shadow: 0 4px 6px rgba(142, 47, 47, 0.2) !important;
     }
 
-    /* 5. 關鍵：把選單按鈕染成深紅色，確保它不會因為是白色而看不見 */
-    div[data-testid="stToolbar"] button {
-        color: #8E2F2F !important;
-        border-color: #8E2F2F !important;
+    /* 4. 加粗裡面的箭頭圖示 */
+    button[data-testid="stSidebarCollapsedControl"] svg {
+        stroke: #8E2F2F !important;
+        stroke-width: 3px !important; /* 加粗線條 */
+        width: 24px !important;
+        height: 24px !important;
     }
-    div[data-testid="stToolbar"] button:hover {
-        color: #ff4b4b !important;
-    }
-    
-    /* 6. 提高 Header 層級，防止被你的標題文字蓋住 */
-    header[data-testid="stHeader"] {
-        z-index: 999999 !important;
-    }
-    
-    /* === 修復結束 === */
 
+    /* 5. 按下去的效果 */
+    button[data-testid="stSidebarCollapsedControl"]:active {
+        background-color: #FDFCF5 !important;
+        transform: scale(0.95);
+    }
     /* =========================================
        1. 側邊欄導航
        ========================================= */
