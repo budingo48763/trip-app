@@ -10,7 +10,7 @@ import urllib.parse
 st.set_page_config(page_title="旅日計畫書", page_icon="⛩️", layout="centered")
 
 # -------------------------------------
-# 2. 日式復古風 CSS (修復版)
+# 2. 日式復古風 CSS (完美還原 Day 按鈕版)
 # -------------------------------------
 st.markdown("""
     <style>
@@ -20,16 +20,14 @@ st.markdown("""
     .stApp { 
         background-color: #FDFCF5 !important; /* 米色紙張感 */
         color: #2B2B2B !important; 
-        font-family: 'Noto Serif JP', serif !important;
+        font-family: 'Noto Serif JP', 'Times New Roman', serif !important;
     }
     
     .stDeployButton, header {visibility: hidden;}
 
     /* =========================================
-       1. 導航樣式 (側邊欄與主畫面分離)
+       1. 側邊欄導航 (保持長條清單)
        ========================================= */
-    
-    /* --- 側邊欄 (Sidebar) : 長條清單 --- */
     section[data-testid="stSidebar"] div[role="radiogroup"] {
         display: flex; flex-direction: column; gap: 8px;
     }
@@ -40,7 +38,6 @@ st.markdown("""
         border: none !important;
         border-bottom: 1px solid #ddd !important;
         background: transparent !important;
-        box-shadow: none !important;
         justify-content: flex-start !important;
     }
     section[data-testid="stSidebar"] div[role="radiogroup"] label p {
@@ -48,7 +45,6 @@ st.markdown("""
         color: #555 !important;
         font-weight: bold !important;
     }
-    /* 側邊欄選中狀態 */
     section[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"] {
         background-color: rgba(142, 47, 47, 0.1) !important;
         border-left: 5px solid #8E2F2F !important;
@@ -57,48 +53,75 @@ st.markdown("""
         color: #8E2F2F !important;
     }
 
-    /* --- 主畫面 (Main) : Day 方塊按鈕 --- */
+    /* =========================================
+       2. 主畫面 Day 按鈕 (圖片風格完美還原)
+       ========================================= */
+    /* 容器設定 */
     .stMain div[role="radiogroup"] { 
-        gap: 15px; padding: 10px 0; justify-content: center; display: flex; flex-wrap: wrap;
+        gap: 12px; padding: 10px 0; justify-content: center; display: flex; flex-wrap: wrap;
     }
-    /* 隱藏圓點 */
+    /* 隱藏預設圓點 */
     .stMain div[role="radiogroup"] label > div:first-child { display: none; }
     
-    /* 未選中方塊 */
+    /* 按鈕本體 (未選中) */
     .stMain div[role="radiogroup"] label {
         background-color: #FFFFFF !important;
-        border: 1px solid #D0C9C0 !important;
-        width: 60px !important;    /* 寬度 */
-        height: 80px !important;   /* 高度 (拉長) */
+        border: 1px solid #E0E0E0 !important; /* 極細灰框 */
+        width: 55px !important;
+        height: 75px !important; /* 拉長比例 */
         display: flex !important;
+        flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
-        border-radius: 2px !important;
-        box-shadow: 2px 2px 8px rgba(0,0,0,0.05);
+        border-radius: 0px !important; /* 直角風格 */
+        box-shadow: none !important;
         padding: 0 !important;
-    }
-    /* 文字設定 (關鍵：允許換行) */
-    .stMain div[role="radiogroup"] label p {
-        color: #aaa !important; /* 淺灰色 Day */
-        font-family: 'Noto Serif JP', serif !important;
-        font-size: 1.4rem !important; /* 數字大一點 */
-        line-height: 1.3 !important;
-        text-align: center !important;
-        white-space: pre !important; /* ⚠️ 關鍵：讓 Day 和 數字 換行 */
+        margin: 0 !important;
     }
 
-    /* 選中方塊 (深紅底) */
+    /* 文字共用設定 */
+    .stMain div[role="radiogroup"] label p {
+        font-family: 'Times New Roman', 'Noto Serif JP', serif !important;
+        text-align: center !important;
+        white-space: pre-wrap !important; /* 允許換行 */
+        line-height: 1.2 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        display: block !important;
+    }
+
+    /* --- 針對數字 (預設樣式) --- */
+    .stMain div[role="radiogroup"] label p {
+        font-size: 2rem !important; /* 數字超大 */
+        font-weight: 500 !important;
+        color: #666 !important; /* 未選中數字顏色 */
+    }
+
+    /* --- 針對 "Day" (利用第一行偽元素) --- */
+    .stMain div[role="radiogroup"] label p::first-line {
+        font-size: 0.8rem !important; /* Day 字體小 */
+        color: #AAA !important; /* Day 顏色淡 */
+        font-weight: 400 !important;
+        line-height: 2 !important; /* 增加 Day 與數字的間距 */
+    }
+
+    /* --- 選中狀態 (深紅背景) --- */
     .stMain div[role="radiogroup"] label[data-checked="true"] {
         background-color: #8E2F2F !important;
-        border-color: #8E2F2F !important;
-        box-shadow: 0 4px 12px rgba(142, 47, 47, 0.3);
+        border: 1px solid #8E2F2F !important;
+        box-shadow: 0 4px 10px rgba(142, 47, 47, 0.2) !important;
     }
+
+    /* 選中時的文字顏色 */
     .stMain div[role="radiogroup"] label[data-checked="true"] p {
-        color: #FFFFFF !important;
+        color: #FFFFFF !important; /* 數字變白 */
+    }
+    .stMain div[role="radiogroup"] label[data-checked="true"] p::first-line {
+        color: rgba(255, 255, 255, 0.7) !important; /* Day 變微透明白 */
     }
 
     /* =========================================
-       2. 輸入框與其他 UI
+       3. 其他 UI 優化
        ========================================= */
     div[data-baseweb="input"], div[data-baseweb="base-input"] {
         background-color: transparent !important;
@@ -106,16 +129,10 @@ st.markdown("""
         border-bottom: 2px solid #8E2F2F !important;
         border-radius: 0 !important;
     }
-    input, textarea {
-        color: #2B2B2B !important;
-        font-weight: bold !important;
-        background-color: transparent !important;
-    }
+    input, textarea { color: #2B2B2B !important; font-weight: bold !important; background-color: transparent !important; }
     div[data-baseweb="timepicker"] { background-color: #FFF !important; }
 
-    /* =========================================
-       3. 卡片設計 (HTML 結構安全版)
-       ========================================= */
+    /* 卡片設計 */
     .trip-card {
         background: #FFFFFF; 
         border: 1px solid #EBE6DE;
@@ -125,42 +142,15 @@ st.markdown("""
         box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05);
         position: relative; 
     }
-    
-    /* 標題與金額區塊 */
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        padding-right: 70px; /* 避開右上角天氣 */
-        margin-bottom: 10px;
-    }
-    
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; padding-right: 70px; margin-bottom: 10px; }
     .card-title-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .card-title { font-size: 1.3rem; font-weight: 900; color: #2B2B2B; margin: 0; }
-    
-    .card-price { 
-        background: #8E2F2F; color: white; 
-        padding: 3px 8px; font-size: 0.85rem; 
-        border-radius: 4px; font-weight: bold;
-        white-space: nowrap;
-    }
-
-    /* 天氣 (絕對定位) */
-    .weather-tag {
-        position: absolute; top: 15px; right: 15px;
-        text-align: right;
-        background: #FDFCF5; /* 加個背景避免文字干擾 */
-        padding: 2px 5px;
-        border-radius: 4px;
-    }
+    .card-price { background: #8E2F2F; color: white; padding: 3px 8px; font-size: 0.85rem; border-radius: 4px; font-weight: bold; white-space: nowrap; }
+    .weather-tag { position: absolute; top: 15px; right: 15px; text-align: right; background: #FDFCF5; padding: 2px 5px; border-radius: 4px; }
     .w-temp { font-size: 1.1rem; font-weight: bold; color: #555; }
-    
-    /* 其他資訊 */
     .card-time { font-family: 'Noto Serif JP', serif; font-size: 1.8rem; font-weight: 700; color: #2B2B2B; text-align: right; margin-top: 10px;}
     .card-loc a { color: #8E2F2F; text-decoration: none; border-bottom: 1px solid #8E2F2F; font-weight: bold;}
     .card-note { color: #666; font-size: 0.9rem; margin-top: 8px; font-style: italic; background: #F7F7F7; padding: 5px 10px; border-radius: 4px;}
-
-    /* 裝飾線 */
     .timeline-line { position: absolute; left: 88px; top: 0; bottom: 0; width: 1px; border-left: 2px dotted #8E2F2F; z-index: 0; }
     .retro-title { font-size: 3rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; }
     .retro-subtitle { font-size: 1rem; color: #888; text-align: center; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-bottom: 20px; }
@@ -223,11 +213,11 @@ if page == "📅 行程規劃":
     st.markdown('<div class="retro-title">長野・名古屋</div>', unsafe_allow_html=True)
     st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
 
-    # ⚠️ 關鍵：Day 選擇器 (使用 \n 換行)
+    # ⚠️ 這裡保持不變，樣式交給上面的 CSS ::first-line 處理
     selected_day_num = st.radio(
         "DaySelect", list(range(1, trip_days_count + 1)), 
         index=0, horizontal=True, label_visibility="collapsed",
-        format_func=lambda x: f"Day\n{x}"  # 這裡的 \n 配合 CSS white-space: pre 達成換行效果
+        format_func=lambda x: f"Day\n{x}" 
     )
 
     current_date = start_date + timedelta(days=selected_day_num - 1)
@@ -264,7 +254,6 @@ if page == "📅 行程規劃":
 
         with c_card:
             if is_edit_mode:
-                # 編輯模式 (使用 Expander)
                 with st.expander(f"📝 {item['title']}", expanded=True):
                     c_del_btn, c_title_input = st.columns([1, 5])
                     if c_del_btn.button("🗑️", key=f"d_{item['id']}"):
@@ -281,25 +270,15 @@ if page == "📅 行程規劃":
                     item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
                     item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
             else:
-                # ⚠️ 關鍵修復：HTML 產生 (使用單行字串拼接，杜絕縮排問題)
                 w_icon, w_temp = get_mock_weather(item['loc'])
-                
-                # 1. 天氣 HTML
                 weather_html = f"<div class='weather-tag'><div class='w-temp'>{w_icon} {w_temp}</div></div>" if item['loc'] else ""
-                
-                # 2. 金額 HTML
                 price_html = f"<div class='card-price'>¥{item['cost']:,}</div>" if item['cost'] > 0 else ""
-                
-                # 3. 地點 HTML
                 loc_html = ""
                 if item['loc']:
                     url = f"https://www.google.com/maps/search/?api=1&query={item['loc']}"
                     loc_html = f"<div class='card-loc'>📍 <a href='{url}' target='_blank'>{item['loc']}</a></div>"
-                
-                # 4. 備註 HTML
                 note_html = f"<div class='card-note'>{item['note']}</div>" if item['note'] else ""
 
-                # 5. 組合所有 HTML (單行)
                 card_html = (
                     f'<div class="trip-card">'
                     f'{weather_html}'
@@ -310,7 +289,6 @@ if page == "📅 行程規劃":
                     f'{note_html}'
                     f'</div>'
                 )
-                
                 st.markdown(card_html, unsafe_allow_html=True)
                 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -320,9 +298,6 @@ if page == "📅 行程規劃":
         route_url = generate_google_map_route(current_items)
         st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
 
-# ==========================================
-# 頁面 2 & 3 (路線全覽 / 準備清單)
-# ==========================================
 elif page == "🗺️ 路線全覽":
     st.markdown('<div class="retro-title">路線地圖</div>', unsafe_allow_html=True)
     map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
