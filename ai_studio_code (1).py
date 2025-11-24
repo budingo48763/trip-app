@@ -95,11 +95,6 @@ st.markdown("""
     }
     div[data-baseweb="timepicker"] { background-color: #FFF !important; }
     
-    /* 記帳表格樣式 */
-    .expense-row {
-        display: flex; justify-content: space-between; border-bottom: 1px dashed #ccc; padding: 4px 0; font-size: 0.9rem; color: #555;
-    }
-
     /* 卡片設計 */
     .trip-card {
         background: #FFFFFF; border: 1px solid #EBE6DE; border-left: 6px solid #8E2F2F;
@@ -148,11 +143,9 @@ def generate_google_map_route(items):
 # -------------------------------------
 # 4. 資料初始化
 # -------------------------------------
-# 標題變數
 if "trip_title" not in st.session_state:
     st.session_state.trip_title = "長野・名古屋"
 
-# 行程資料
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
         1: [{"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans", "note": "", "expenses": []}],
@@ -178,7 +171,6 @@ with st.sidebar:
     st.divider()
     
     st.markdown("### ⚙️ 設定")
-    # 標題編輯功能
     st.session_state.trip_title = st.text_input("旅程標題", value=st.session_state.trip_title)
     start_date = st.date_input("出發日期", value=datetime.today())
     trip_days_count = st.number_input("旅遊天數", 1, 30, 5)
@@ -191,7 +183,6 @@ for d in range(1, trip_days_count + 1):
 # 頁面 1: 行程規劃
 # ==========================================
 if page == "📅 行程規劃":
-    # 標題顯示 (讀取 session_state)
     st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
     st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
 
@@ -206,7 +197,6 @@ if page == "📅 行程規劃":
     week_str = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][int(current_date.strftime("%w"))]
 
     current_items = st.session_state.trip_data[selected_day_num]
-    # 確保每個項目都有 expenses 欄位
     for item in current_items:
         if "expenses" not in item: item["expenses"] = []
     
@@ -243,7 +233,7 @@ if page == "📅 行程規劃":
                 # ✏️ 編輯模式
                 # ==========================
                 with st.expander(f"📝 {item['title']}", expanded=True):
-                    # 1. 基本資訊編輯
+                    # 1. 基本資訊
                     c_del_btn, c_title_input = st.columns([1, 5])
                     if c_del_btn.button("🗑️", key=f"d_{item['id']}"):
                         st.session_state.trip_data[selected_day_num].pop(index)
@@ -255,13 +245,13 @@ if page == "📅 行程規劃":
                     except: t_obj = datetime.strptime("09:00", "%H:%M").time()
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
                     
-                    # ⚠️ 金額顯示 (自動計算，唯讀)
+                    # 金額唯讀
                     c2.markdown(f"**💰 總金額: ¥{item['cost']:,}**")
                     
                     item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
                     item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
 
-                    # 2. 🧾 細項記帳功能 (新功能)
+                    # 2. 🧾 消費明細 (記帳)
                     st.markdown("---")
                     st.caption("🧾 消費明細 (自動計算總額)")
                     
@@ -273,91 +263,17 @@ if page == "📅 行程規劃":
                             ce2.text(f"¥{exp['price']:,}")
                             if ce3.button("✖", key=f"del_exp_{item['id']}_{idx}"):
                                 item["expenses"].pop(idx)
-                                item['cost'] = sum(x['price'] for x in item['expenses']) # 重新計算總額
+                                item['cost'] = sum(x['price'] for x in item['expenses'])
                                 st.rerun()
 
-                    # 新增明細 (使用 Form 避免一直刷新)
-                    with st.form(key=f"add_exp_form_{item['id']}"):
-                        c_add1, c_add2, c_add3 = st.columns([3, 2, 1])
-                        new_exp_name = c_add1.text_input("項目", placeholder="例: 飲料", label_visibility="collapsed")
-                        new_exp_price = c_add2.number_input("金額", min_value=0, step=100, label_visibility="collapsed")
-                        submit_exp = c_add3.form_submit_button("➕")
-                        
-                        if submit_exp and new_exp_name:
-                            item["expenses"].append({"name": new_exp_name, "price": new_exp_price})
-                            item['cost'] = sum(x['price'] for x in item['expenses']) # 自動加總
-                            st.rerun()
+                    # ==========================================================
+                    # ⚠️ 關鍵修正：輸入後自動清空 (使用 Session State 操控)
+                    # ==========================================================
+                    c_add1, c_add2, c_add3 = st.columns([3, 2, 1])
+                    
+                    # 定義 Key
+                    name_key = f"new_exp_name_{item['id']}"
+                    price_key = f"new_exp_price_{item['id']}"
 
-            else:
-                # ==========================
-                # 👓 瀏覽模式
-                # ==========================
-                w_icon, w_temp = get_mock_weather(item['loc'])
-                weather_html = f"<div class='weather-tag'><div class='w-temp'>{w_icon} {w_temp}</div></div>" if item['loc'] else ""
-                price_html = f"<div class='card-price'>¥{item['cost']:,}</div>" if item['cost'] > 0 else ""
-                
-                loc_html = ""
-                if item['loc']:
-                    url = f"https://www.google.com/maps/search/?api=1&query={item['loc']}"
-                    loc_html = f"<div class='card-loc'>📍 <a href='{url}' target='_blank'>{item['loc']}</a></div>"
-                
-                # 備註區塊 + 消費明細展示
-                note_content = item['note']
-                if item['expenses']:
-                    # 將消費明細轉為 HTML 列表顯示在備註區
-                    exp_list_html = "<div style='margin-top:5px; padding-top:5px; border-top:1px dashed #ccc; font-size:0.85rem;'>"
-                    for exp in item['expenses']:
-                        exp_list_html += f"<div style='display:flex; justify-content:space-between;'><span>• {exp['name']}</span><span>¥{exp['price']:,}</span></div>"
-                    exp_list_html += "</div>"
-                    note_content += exp_list_html
-
-                note_html = f"<div class='card-note'>{note_content}</div>" if note_content else ""
-
-                card_html = (
-                    f'<div class="trip-card">'
-                    f'{weather_html}'
-                    f'<div class="card-header">'
-                    f'<div class="card-title-group"><div class="card-title">{item["title"]}</div>{price_html}</div>'
-                    f'</div>'
-                    f'{loc_html}'
-                    f'{note_html}'
-                    f'</div>'
-                )
-                st.markdown(card_html, unsafe_allow_html=True)
-                
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    if current_items:
-        st.markdown("---")
-        route_url = generate_google_map_route(current_items)
-        st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
-
-# ... (路線全覽與準備清單程式碼與前一版相同，為節省篇幅省略，若有需要請複製上一版) ...
-elif page == "🗺️ 路線全覽":
-    st.markdown('<div class="retro-title">路線地圖</div>', unsafe_allow_html=True)
-    map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
-    map_items = st.session_state.trip_data[map_day]
-    map_items.sort(key=lambda x: x['time'])
-    if len(map_items) > 1:
-        dot = graphviz.Digraph()
-        dot.attr(rankdir='LR')
-        dot.attr('node', shape='note', style='filled', fillcolor='#FDFCF5', color='#8E2F2F', fontname='Noto Serif JP')
-        last = None
-        for item in map_items:
-            label = f"{item['time']}\n{item['loc'] or item['title']}"
-            dot.node(str(item['id']), label)
-            if last: dot.edge(last, str(item['id']), color="#8E2F2F")
-            last = str(item['id'])
-        st.graphviz_chart(dot)
-    else: st.info("行程過少，無法繪製路線。")
-
-elif page == "🎒 準備清單":
-    st.markdown('<div class="retro-title">旅の支度</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    keys = list(st.session_state.checklist.keys())
-    with c1:
-        st.markdown("##### 🛂 必要證件")
-        for k in keys[:4]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
-    with c2:
-        st.markdown("##### 🧳 生活用品")
-        for k in keys[4:]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
+                    with c_add1:
+                        # 這裡的 value 雖然不能直接綁，但我們可以讀取 session_state
