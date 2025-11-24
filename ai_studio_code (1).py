@@ -41,38 +41,48 @@ st.markdown("""
         font-family: 'Noto Serif JP', 'Times New Roman', serif !important;
     }
     
-    /* 1. 只隱藏 Deploy 按鈕，不要隱藏整個 header */
-    /* === 🚀 手機版側邊欄按鈕強力修復開始 === */
+    /* === 🛠️ 第三次修復：最保險的寫法 === */
     
-    /* 1. 強制顯示 Header，並將層級拉到最高 (確保不被其他元件擋住) */
-    header[data-testid="stHeader"] {
+    /* 1. 絕對不要隱藏 header，改為背景透明 */
+    header {
         visibility: visible !important;
         background-color: transparent !important;
-        z-index: 999999 !important; /* 關鍵：圖層置頂 */
     }
 
-    /* 2. 隱藏 Deploy 按鈕 (右上角的火箭) 和 頂部的彩虹裝飾條 */
-    .stDeployButton, header[data-testid="stHeader"] > div:first-child {
-        visibility: hidden !important;
+    /* 2. 隱藏頂部的彩虹裝飾條 (Streamlit 預設的那條) */
+    div[data-testid="stDecoration"] {
         display: none !important;
     }
 
-    /* 3. 強制設定「漢堡選單按鈕」的顏色與可見性 */
-    /* 這是最關鍵的一步：把按鈕改成你的主題紅色，防止它是白色的導致看不見 */
-    header[data-testid="stHeader"] button[kind="header"] {
-        visibility: visible !important;
-        color: #8E2F2F !important; /* 改成你的酒紅色 */
-        display: block !important;
-    }
-    
-    /* 確保 Toolbar 區域也是顯示的 */
-    div[data-testid="stToolbar"] {
-        visibility: visible !important;
-        display: flex !important;
+    /* 3. 只隱藏 Deploy (火箭/部署) 按鈕 */
+    .stDeployButton {
+        display: none !important;
+        visibility: hidden !important;
     }
 
-    /* === 🚀 手機版側邊欄按鈕強力修復結束 === */
+    /* 4. 強制顯示功能列 (漢堡選單就在這裡面) */
+    div[data-testid="stToolbar"] {
+        visibility: visible !important;
+        display: block !important;
+        right: 0 !important;
+        left: auto !important;
     }
+
+    /* 5. 關鍵：把選單按鈕染成深紅色，確保它不會因為是白色而看不見 */
+    div[data-testid="stToolbar"] button {
+        color: #8E2F2F !important;
+        border-color: #8E2F2F !important;
+    }
+    div[data-testid="stToolbar"] button:hover {
+        color: #ff4b4b !important;
+    }
+    
+    /* 6. 提高 Header 層級，防止被你的標題文字蓋住 */
+    header[data-testid="stHeader"] {
+        z-index: 999999 !important;
+    }
+    
+    /* === 修復結束 === */
 
     /* =========================================
        1. 側邊欄導航
