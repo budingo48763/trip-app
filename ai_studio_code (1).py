@@ -1,5 +1,4 @@
 import streamlit as st
-import textwrap
 
 # -------------------------------------
 # 1. 系統設定
@@ -7,11 +6,11 @@ import textwrap
 st.set_page_config(page_title="長野・名古屋之旅", page_icon="🗾", layout="centered")
 
 # -------------------------------------
-# 2. 自定義 CSS (修復版)
+# 2. 自定義 CSS
 # -------------------------------------
 st.markdown("""
     <style>
-    .stApp { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #F8F9FA; }
+    .stApp { font-family: 'Helvetica Neue', Helvetica, 'Microsoft JhengHei', Arial, sans-serif; background-color: #F8F9FA; }
     .stDeployButton, header {visibility: hidden;}
 
     /* 頂部資訊卡 */
@@ -29,7 +28,7 @@ st.markdown("""
     .weather-temp { font-size: 1.6rem; font-weight: 800; color: #333; }
     .weather-desc { font-size: 0.85rem; color: #888; background: #eee; padding: 2px 8px; border-radius: 6px; }
 
-    /* Day 按鈕樣式 (隱藏 Radio 圓點) */
+    /* Day 按鈕樣式 */
     div[role="radiogroup"] { gap: 8px; overflow-x: auto; padding-bottom: 5px; }
     div[role="radiogroup"] label > div:first-child { display: none; }
     div[role="radiogroup"] label {
@@ -40,12 +39,13 @@ st.markdown("""
         background: #333 !important; color: white !important; border-color: #333;
     }
 
-    /* 時間軸與卡片 */
+    /* 時間軸線條 */
+    .timeline-wrapper { position: relative; padding-left: 10px; }
     .timeline-line {
         position: absolute; left: 69px; top: 0; bottom: 0; width: 2px; background: #E0E0E0; z-index: 0;
     }
     
-    /* 核心修復：卡片樣式 */
+    /* 卡片樣式 */
     .trip-card {
         background: white;
         border-radius: 12px;
@@ -53,20 +53,17 @@ st.markdown("""
         box-shadow: 0 2px 6px rgba(0,0,0,0.05);
         border-left: 5px solid #ccc;
         margin-bottom: 15px;
-        width: 100%; /* 強制寬度 */
+        width: 100%;
         position: relative;
         z-index: 1;
     }
-    /* 確保標題不換行 */
-    .card-title { 
-        font-size: 1.1rem; font-weight: 700; color: #222; margin-bottom: 5px;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .card-content-row { display: flex; justify-content: space-between; align-items: center; }
-    .card-price { background: #F3F4F6; color: #555; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+    .card-content-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+    .card-title { font-size: 1.1rem; font-weight: 700; color: #222; margin: 0; }
+    .card-price { background: #F3F4F6; color: #555; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
     .card-loc a { color: #666; text-decoration: none; font-size: 0.9rem; display: flex; align-items: center; gap: 5px; }
     .card-note { font-size: 0.85rem; color: #999; margin-top: 4px; font-style: italic; }
 
+    /* 時間與圓點 */
     .time-col { font-size: 1.1rem; font-weight: 700; color: #444; text-align: right; padding-right: 10px; }
     .dot-col { display: flex; justify-content: center; }
     .timeline-dot {
@@ -112,43 +109,23 @@ current_items = st.session_state.trip_data[selected_day]
 total_cost = sum(i['cost'] for i in current_items)
 day_str = days_map.get(selected_day, "")
 
-# Header
-st.markdown(f"""
-<div class="header-card">
-    <div class="header-top">
-        <div style="display:flex;">
-            <div class="header-time">11:35</div>
-            <div class="header-day">{day_str}</div>
-        </div>
-        <div class="weather-box">
-            <div class="weather-temp">12°</div>
-            <div class="weather-desc">舒適涼爽</div>
-        </div>
-    </div>
-    <div class="header-route">名古屋 ✈️ 上諏訪</div>
-</div>
-""", unsafe_allow_html=True)
+# Header HTML (這裡也去掉縮排)
+header_html = f"""<div class="header-card"><div class="header-top"><div style="display:flex;"><div class="header-time">11:35</div><div class="header-day">{day_str}</div></div><div class="weather-box"><div class="weather-temp">12°</div><div class="weather-desc">舒適涼爽</div></div></div><div class="header-route">名古屋 ✈️ 上諏訪</div></div>"""
+st.markdown(header_html, unsafe_allow_html=True)
 
 # 工具列
 col_info, col_edit = st.columns([3, 1])
 col_info.caption(f"Day {selected_day} 行程 • 預算 ¥{total_cost:,}")
 is_edit = col_edit.checkbox("編輯模式", value=False)
 
-# 顏色設定
-cat_colors = {
-    "food": "#FF6B6B", "trans": "#4ECDC4", 
-    "stay": "#5E548E", "play": "#FFD93D", "other": "#95A5A6"
-}
+cat_colors = {"food": "#FF6B6B", "trans": "#4ECDC4", "stay": "#5E548E", "play": "#FFD93D", "other": "#95A5A6"}
 
-# 時間軸容器
-st.markdown('<div style="position:relative; padding-left:10px;">', unsafe_allow_html=True)
-st.markdown('<div class="timeline-line"></div>', unsafe_allow_html=True)
+st.markdown('<div class="timeline-wrapper"><div class="timeline-line"></div>', unsafe_allow_html=True)
 
 if not current_items:
     st.info("😴 今天沒有行程")
 
 for item in current_items:
-    # 欄位比例調整：[時間, 圓點, 內容]
     c1, c2, c3 = st.columns([1, 0.4, 5])
     
     with c1:
@@ -168,25 +145,22 @@ for item in current_items:
                 item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
                 item['title'] = new_title
         else:
-            # ---------------------------------------------------------
-            # 關鍵修復：使用 textwrap.dedent 確保 HTML 沒有縮排
-            # ---------------------------------------------------------
+            # -------------------------------------------------------------
+            # ⚠️ 關鍵修正：將 HTML 壓縮成一行，不要有換行符號
+            # -------------------------------------------------------------
             border_color = cat_colors.get(item.get("cat", "other"), "#ccc")
             price_html = f'<div class="card-price">¥{item["cost"]:,}</div>' if item["cost"] > 0 else ""
             loc_link = f'https://www.google.com/maps/search/?api=1&query={item["loc"]}'
-            loc_html = f'<a href="{loc_link}" target="_blank">📍 {item["loc"]}</a>' if item['loc'] else ""
+            loc_html = f'<div class="card-loc"><a href="{loc_link}" target="_blank">📍 {item["loc"]}</a></div>' if item['loc'] else ""
+            note_html = f'<div class="card-note">{item["note"]}</div>' if item["note"] else ""
             
-            # 注意：這裡使用 dedent，這樣就算 Python 程式碼有縮排，字串也會被推到最左邊
-            card_html = textwrap.dedent(f"""
-                <div class="trip-card" style="border-left-color: {border_color};">
-                    <div class="card-content-row">
-                        <div class="card-title">{item['title']}</div>
-                        {price_html}
-                    </div>
-                    <div class="card-loc">{loc_html}</div>
-                    <div class="card-note">{item['note']}</div>
-                </div>
-            """)
-            st.markdown(card_html, unsafe_allow_html=True)
+            # 這裡把所有字串接起來，不使用多行字串 (f"""...""")，解決 HTML 外洩問題
+            full_html = (
+                f'<div class="trip-card" style="border-left-color: {border_color};">'
+                f'<div class="card-content-row"><div class="card-title">{item["title"]}</div>{price_html}</div>'
+                f'{loc_html}{note_html}</div>'
+            )
+            
+            st.markdown(full_html, unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
