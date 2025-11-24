@@ -2,17 +2,18 @@ import streamlit as st
 from datetime import datetime, timedelta
 import random
 import graphviz
-import urllib.parse
+import urllib.parse  # 確保這行有被匯入
 
 # -------------------------------------
-# 1. 系統設定
+# 1. 系統設定 (必須是第一行)
 # -------------------------------------
-# 設定 initial_sidebar_state="collapsed" 雖然我們稍後會用 CSS 把它完全隱藏
 st.set_page_config(page_title="旅日計畫書", page_icon="⛩️", layout="centered", initial_sidebar_state="collapsed")
 
-# ======================================================
-# Callback 函數
-# ======================================================
+# -------------------------------------
+# 2. 輔助函數定義 (必須放在主程式之前)
+# -------------------------------------
+
+# (A) 新增消費明細的回調函數
 def add_expense_callback(item, name_key, price_key):
     new_name = st.session_state.get(name_key, "")
     new_price = st.session_state.get(price_key, 0)
@@ -22,8 +23,23 @@ def add_expense_callback(item, name_key, price_key):
         st.session_state[name_key] = ""
         st.session_state[price_key] = 0
 
+# (B) 產生天氣模擬資料
+def get_mock_weather(location):
+    if not location: return "", ""
+    weathers = ["☀️ 晴", "⛅ 多雲", "🌧️ 雨", "❄️ 雪"]
+    random.seed(len(location) + datetime.now().day) 
+    return random.choice(weathers), f"{random.randint(5, 18)}°C"
+
+# (C) 產生 Google Maps 路線連結 (這就是剛剛報錯遺失的函數)
+def generate_google_map_route(items):
+    if len(items) < 1: return "#"
+    base_url = "https://www.google.com/maps/dir/"
+    # 這裡使用 urllib.parse 來處理網址編碼
+    locations = [urllib.parse.quote(item['loc']) for item in items if item['loc']]
+    return base_url + "/".join(locations) if locations else "#"
+
 # -------------------------------------
-# 2. 日式復古風 CSS (分頁版)
+# 3. 日式復古風 CSS & 介面優化
 # -------------------------------------
 st.markdown("""
     <style>
@@ -37,35 +53,23 @@ st.markdown("""
     }
 
     /* =========================================================
-       🛑 徹底隱藏側邊欄與多餘介面
+       🛑 隱藏側邊欄與多餘介面
        ========================================================= */
-    
-    /* 1. 隱藏側邊欄開關 (漢堡選單/箭頭) */
-    [data-testid="stSidebarCollapsedControl"] {
+    [data-testid="stSidebarCollapsedControl"], section[data-testid="stSidebar"] {
         display: none !important;
     }
-    
-    /* 2. 隱藏側邊欄本體 (防止滑動誤觸) */
-    section[data-testid="stSidebar"] {
-        display: none !important;
-        width: 0 !important;
-    }
-
-    /* 3. 隱藏右上角選單 & Footer */
     div[data-testid="stToolbar"], div[data-testid="stDecoration"], footer {
         visibility: hidden !important;
         display: none !important;
     }
     header[data-testid="stHeader"] {
         background-color: transparent !important;
-        height: 0 !important; /* 讓 Header 不佔空間 */
+        height: 0 !important;
     }
 
     /* =========================================================
-       📑 分頁 (Tabs) 樣式設計 - 日式風格
+       📑 分頁 (Tabs) 樣式
        ========================================================= */
-    
-    /* 分頁按鈕文字 */
     button[data-baseweb="tab"] {
         font-family: 'Noto Serif JP', serif !important;
         font-size: 1.1rem !important;
@@ -73,46 +77,23 @@ st.markdown("""
         color: #888 !important;
         background-color: transparent !important;
         border-bottom: 2px solid transparent !important;
-        padding: 10px 5px !important;
     }
-
-    /* 滑鼠滑過 */
-    button[data-baseweb="tab"]:hover {
-        color: #8E2F2F !important;
-        background-color: rgba(142, 47, 47, 0.05) !important;
-    }
-
-    /* 選中的分頁 (Active) */
     button[data-baseweb="tab"][aria-selected="true"] {
         color: #8E2F2F !important;
-        border-bottom: 3px solid #8E2F2F !important; /* 紅色底線 */
+        border-bottom: 3px solid #8E2F2F !important;
     }
-    
-    /* 隱藏預設的紅色滑動條 (我們自己用 border-bottom 做比較復古) */
-    div[data-baseweb="tab-highlight"] {
-        display: none !important;
-    }
-    
-    /* 分頁容器微調 */
-    div[data-baseweb="tab-list"] {
-        gap: 10px;
-        margin-bottom: 20px;
-        border-bottom: 1px solid #ddd;
-    }
+    div[data-baseweb="tab-highlight"] { display: none !important; }
+    div[data-baseweb="tab-list"] { gap: 10px; margin-bottom: 20px; border-bottom: 1px solid #ddd; }
 
     /* =========================================================
        其他 UI 元件
        ========================================================= */
-
-    /* Day 選擇按鈕 */
     .stMain div[role="radiogroup"] { 
         gap: 8px; padding: 10px 0; justify-content: flex-start; display: flex; overflow-x: auto; 
     }
     .stMain div[role="radiogroup"] label > div:first-child { display: none; }
-    
     .stMain div[role="radiogroup"] label {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E0E0E0 !important;
+        background-color: #FFFFFF !important; border: 1px solid #E0E0E0 !important;
         min-width: 50px !important; height: 70px !important;
         display: flex !important; flex-direction: column !important;
         align-items: center !important; justify-content: center !important;
@@ -120,22 +101,15 @@ st.markdown("""
         padding: 0 !important; margin: 0 !important;
     }
     .stMain div[role="radiogroup"] label p {
-        font-family: 'Times New Roman', 'Noto Serif JP', serif !important;
-        text-align: center !important; white-space: pre-wrap !important;
-        line-height: 1.2 !important; width: 100% !important; margin: 0 !important; display: block !important;
         font-size: 1.8rem !important; font-weight: 500 !important; color: #666 !important;
-    }
-    .stMain div[role="radiogroup"] label p::first-line {
-        font-size: 0.8rem !important; color: #AAA !important; font-weight: 400 !important; line-height: 2 !important;
+        line-height: 1.2 !important; width: 100% !important; margin: 0 !important; text-align: center !important;
     }
     .stMain div[role="radiogroup"] label[data-checked="true"] {
         background-color: #8E2F2F !important; border: 1px solid #8E2F2F !important;
         box-shadow: 0 4px 8px rgba(142, 47, 47, 0.2) !important;
     }
     .stMain div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
-    .stMain div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.7) !important; }
-
-    /* 輸入框 */
+    
     div[data-baseweb="input"], div[data-baseweb="base-input"] {
         background-color: transparent !important; border: none !important;
         border-bottom: 2px solid #8E2F2F !important; border-radius: 0 !important;
@@ -144,12 +118,7 @@ st.markdown("""
         color: #2B2B2B !important; font-weight: bold !important; background-color: transparent !important;
     }
     div[data-baseweb="timepicker"] { background-color: #FFF !important; }
-    
-    /* 編輯模式 Toggle */
-    div[data-testid="stToggle"] {
-        justify-content: flex-end;
-        padding: 5px;
-    }
+    div[data-testid="stToggle"] { justify-content: flex-end; padding: 5px; }
     
     /* 卡片設計 */
     .trip-card {
@@ -157,44 +126,21 @@ st.markdown("""
         padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05);
         position: relative; 
     }
-    .card-header {
-        display: flex; justify-content: space-between; align-items: flex-start; padding-right: 70px; margin-bottom: 10px;
-    }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; padding-right: 70px; margin-bottom: 10px; }
     .card-title-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .card-title { font-size: 1.3rem; font-weight: 900; color: #2B2B2B; margin: 0; }
-    .card-price { 
-        background: #8E2F2F; color: white; padding: 3px 8px; font-size: 0.85rem; 
-        border-radius: 4px; font-weight: bold; white-space: nowrap;
-    }
-    .weather-tag {
-        position: absolute; top: 15px; right: 15px; text-align: right; background: #FDFCF5; padding: 2px 5px; border-radius: 4px;
-    }
+    .card-price { background: #8E2F2F; color: white; padding: 3px 8px; font-size: 0.85rem; border-radius: 4px; font-weight: bold; white-space: nowrap; }
+    .weather-tag { position: absolute; top: 15px; right: 15px; text-align: right; background: #FDFCF5; padding: 2px 5px; border-radius: 4px; }
     .w-temp { font-size: 1.1rem; font-weight: bold; color: #555; }
     .card-time { font-family: 'Noto Serif JP', serif; font-size: 1.8rem; font-weight: 700; color: #2B2B2B; text-align: right; margin-top: 10px;}
     .card-loc a { color: #8E2F2F; text-decoration: none; border-bottom: 1px solid #8E2F2F; font-weight: bold;}
     .card-note { color: #666; font-size: 0.9rem; margin-top: 8px; font-style: italic; background: #F7F7F7; padding: 5px 10px; border-radius: 4px;}
     
-    /* 標題樣式 */
     .retro-title { font-size: 2.5rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; margin-top: 10px;}
     .retro-subtitle { font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 10px; }
     .timeline-line { position: absolute; left: 88px; top: 0; bottom: 0; width: 1px; border-left: 2px dotted #8E2F2F; z-index: 0; }
     </style>
 """, unsafe_allow_html=True)
-
-# -------------------------------------
-# 3. 輔助函數
-# -------------------------------------
-def get_mock_weather(location):
-    if not location: return "", ""
-    weathers = ["☀️ 晴", "⛅ 多雲", "🌧️ 雨", "❄️ 雪"]
-    random.seed(len(location) + datetime.now().day) 
-    return random.choice(weathers), f"{random.randint(5, 18)}°C"
-
-def generate_google_map_route(items):
-    if len(items) < 1: return "#"
-    base_url = "https://www.google.com/maps/dir/"
-    locations = [urllib.parse.quote(item['loc']) for item in items if item['loc']]
-    return base_url + "/".join(locations) if locations else "#"
 
 # -------------------------------------
 # 4. 資料初始化
@@ -219,20 +165,20 @@ if "checklist" not in st.session_state:
     }
 
 # -------------------------------------
-# 5. 主畫面配置 (取代側邊欄)
+# 5. 主畫面 (Tabs 佈局)
 # -------------------------------------
 
 # 標題區
 st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
 st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
 
-# 設定區 (使用 Expander 收納)
+# 設定區 (使用 Expander)
 with st.expander("⚙️ 旅程設定 (日期/標題)"):
     st.session_state.trip_title = st.text_input("旅程標題", value=st.session_state.trip_title)
     start_date = st.date_input("出發日期", value=datetime.today())
     trip_days_count = st.number_input("旅遊天數", 1, 30, 5)
 
-# 初始化日期資料
+# 確保日期資料存在
 for d in range(1, trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
@@ -243,7 +189,7 @@ tab1, tab2, tab3 = st.tabs(["📅 行程規劃", "🗺️ 路線全覽", "🎒 �
 # 分頁 1: 行程規劃
 # ==========================================
 with tab1:
-    # Day 選擇器 (橫向捲動)
+    # Day 選擇器
     selected_day_num = st.radio(
         "DaySelect", list(range(1, trip_days_count + 1)), 
         index=0, horizontal=True, label_visibility="collapsed",
@@ -260,7 +206,7 @@ with tab1:
     
     total_cost = sum(i['cost'] for i in current_items)
     
-    # 日期顯示與編輯開關
+    # 標題與編輯開關
     c_date, c_edit = st.columns([2, 1])
     with c_date:
         st.markdown(f"### 🗓️ {date_str} {week_str}")
@@ -292,6 +238,7 @@ with tab1:
 
         with c_card:
             if is_edit_mode:
+                # 編輯模式
                 with st.expander(f"📝 {item['title']}", expanded=True):
                     c_del_btn, c_title_input = st.columns([1, 5])
                     if c_del_btn.button("🗑️", key=f"d_{item['id']}"):
@@ -338,6 +285,7 @@ with tab1:
                         )
 
             else:
+                # 瀏覽模式
                 w_icon, w_temp = get_mock_weather(item['loc'])
                 weather_html = f"<div class='weather-tag'><div class='w-temp'>{w_icon} {w_temp}</div></div>" if item['loc'] else ""
                 price_html = f"<div class='card-price'>¥{item['cost']:,}</div>" if item['cost'] > 0 else ""
@@ -370,6 +318,46 @@ with tab1:
                 
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # 確保函數存在後再呼叫
     if current_items:
         st.markdown("---")
-        route_url = genera
+        try:
+            route_url = generate_google_map_route(current_items)
+            st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"地圖產生失敗: {e}")
+
+# ==========================================
+# 分頁 2: 路線地圖
+# ==========================================
+with tab2:
+    st.markdown('<div class="retro-subtitle">ROUTE MAP</div>', unsafe_allow_html=True)
+    map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
+    map_items = st.session_state.trip_data[map_day]
+    map_items.sort(key=lambda x: x['time'])
+    if len(map_items) > 1:
+        dot = graphviz.Digraph()
+        dot.attr(rankdir='LR')
+        dot.attr('node', shape='note', style='filled', fillcolor='#FDFCF5', color='#8E2F2F', fontname='Noto Serif JP')
+        last = None
+        for item in map_items:
+            label = f"{item['time']}\n{item['loc'] or item['title']}"
+            dot.node(str(item['id']), label)
+            if last: dot.edge(last, str(item['id']), color="#8E2F2F")
+            last = str(item['id'])
+        st.graphviz_chart(dot)
+    else: st.info("行程過少，無法繪製路線。")
+
+# ==========================================
+# 分頁 3: 準備清單
+# ==========================================
+with tab3:
+    st.markdown('<div class="retro-subtitle">CHECKLIST</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    keys = list(st.session_state.checklist.keys())
+    with c1:
+        st.markdown("##### 🛂 必要證件")
+        for k in keys[:4]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
+    with c2:
+        st.markdown("##### 🧳 生活用品")
+        for k in keys[4:]: st.session_state.checklist[k] = st.checkbox(k, value=st.session_state.checklist[k])
