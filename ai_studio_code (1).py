@@ -1,6 +1,5 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # -------------------------------------
 # 1. 系統設定
@@ -8,272 +7,207 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="長野・名古屋之旅", page_icon="🗾", layout="centered")
 
 # -------------------------------------
-# 2. 自定義 CSS (核心樣式還原)
+# 2. 自定義 CSS (強力修復版)
 # -------------------------------------
 st.markdown("""
     <style>
-    /* 全局字體 */
-    .stApp { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'LiHei Pro', sans-serif; background-color: #F8F9FA; }
+    /* 全局字體與背景 */
+    .stApp { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #F8F9FA; }
     
-    /* 頂部大標題區塊 */
-    .header-container {
+    /* 隱藏 Streamlit 預設元素 */
+    .stDeployButton {display:none;}
+    header {visibility: hidden;}
+
+    /* 頂部大標題區塊 (改用 Flexbox 避免重疊) */
+    .header-card {
         background: white;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        margin-bottom: 20px;
-        position: relative;
-    }
-    .big-time { font-size: 3rem; font-weight: 700; color: #333; line-height: 1; }
-    .week-day { font-size: 1.2rem; color: #888; font-weight: 400; writing-mode: vertical-rl; position: absolute; top: 25px; left: 140px;}
-    .route-text { font-size: 1.5rem; font-weight: 600; color: #333; margin-top: 10px; }
-    .weather-badge {
-        position: absolute; top: 20px; right: 20px;
-        text-align: center; color: #555;
-    }
-    .temp-text { font-size: 1.5rem; font-weight: bold; }
-    
-    /* 日期導航條 */
-    .day-nav { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 10px; }
-    .day-btn {
-        background: white; border: 1px solid #ddd; border-radius: 8px;
-        padding: 8px 15px; min-width: 60px; text-align: center; cursor: pointer;
-        color: #888; font-size: 0.9rem;
-    }
-    .day-btn.active { background: #A44A4A; color: white; border-color: #A44A4A; font-weight: bold; }
-    
-    /* 時間軸樣式 (Timeline) */
-    .timeline-container {
-        position: relative;
-        padding-left: 20px;
-        margin-top: 20px;
-    }
-    /* 垂直線 */
-    .timeline-line {
-        position: absolute;
-        left: 26px;
-        top: 10px;
-        bottom: -20px;
-        width: 2px;
-        background-color: #E0E0E0;
-        z-index: 0;
-    }
-    
-    /* 行程卡片 */
-    .itinerary-item {
-        display: flex;
+        padding: 20px 25px;
+        border-radius: 20px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.06);
         margin-bottom: 25px;
+        border: 1px solid #eee;
+    }
+    .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+    .header-time { font-size: 3.5rem; font-weight: 800; color: #333; line-height: 1; letter-spacing: -1px; }
+    .header-day { font-size: 1.2rem; color: #999; font-weight: 500; margin-left: 10px; margin-top: 15px;}
+    .header-route { font-size: 1.4rem; font-weight: 700; color: #444; margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+    
+    /* 天氣區塊 */
+    .weather-box { text-align: right; }
+    .weather-temp { font-size: 1.8rem; font-weight: 800; color: #333; }
+    .weather-desc { font-size: 0.9rem; color: #888; background: #f0f0f0; padding: 2px 8px; border-radius: 6px; display: inline-block; margin-top: 4px; }
+
+    /* Day 選擇器樣式優化 (隱藏圓點) */
+    div[role="radiogroup"] { gap: 8px; overflow-x: auto; padding-bottom: 5px; }
+    div[role="radiogroup"] label > div:first-child { display: none; } /* 隱藏 Radio 圓圈 */
+    div[role="radiogroup"] label {
+        background: white !important;
+        border: 1px solid #eee;
+        padding: 8px 16px !important;
+        border-radius: 12px !important;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+    }
+    div[role="radiogroup"] label[data-checked="true"] {
+        background: #333 !important;
+        color: white !important;
+        border-color: #333;
+    }
+
+    /* 時間軸樣式 */
+    .timeline-wrapper { position: relative; padding-left: 10px; }
+    .timeline-line {
+        position: absolute; left: 84px; top: 0; bottom: 0;
+        width: 2px; background: #E0E0E0; z-index: 0;
+    }
+
+    /* 卡片內容樣式 (避免 HTML 破圖的核心) */
+    .trip-card {
+        background: white;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        border-left: 5px solid #ccc; /* 預設顏色 */
+        width: 100%;
+        margin-bottom: 20px;
         position: relative;
         z-index: 1;
     }
-    .time-col {
-        width: 60px;
-        text-align: right;
-        padding-right: 15px;
-        font-weight: 600;
-        color: #333;
-        font-size: 1.1rem;
-        padding-top: 5px;
-    }
-    .dot-col {
-        width: 20px;
-        display: flex;
-        justify-content: center;
-        padding-top: 10px;
-    }
-    .dot {
-        width: 12px; height: 12px;
-        background-color: #A44A4A; /* 深紅色圓點 */
-        border-radius: 50%;
-        border: 2px solid white;
-        box-shadow: 0 0 0 1px #A44A4A;
-    }
-    .content-card {
-        flex: 1;
-        background: white;
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin-left: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        border-left: 4px solid #A44A4A; /* 分類顏色 */
-    }
-    .item-title { font-size: 1.1rem; font-weight: bold; color: #333; margin-bottom: 4px; }
-    .item-sub { font-size: 0.9rem; color: #666; margin-bottom: 4px; }
-    .item-cost { 
-        display: inline-block; 
-        background: #f0f0f0; 
-        color: #333; 
-        padding: 2px 8px; 
-        border-radius: 4px; 
-        font-size: 0.85rem; 
-        font-weight: 600;
-        float: right;
-    }
-    .map-link { color: #A44A4A; text-decoration: none; font-size: 0.85rem; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .card-title { font-size: 1.15rem; font-weight: 700; color: #222; margin: 0; }
+    .card-price { background: #F3F4F6; color: #555; padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; }
+    .card-loc { font-size: 0.9rem; color: #666; display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+    .card-loc a { color: #555; text-decoration: none; border-bottom: 1px dotted #999; }
+    .card-note { font-size: 0.85rem; color: #999; font-style: italic; }
     
-    /* 隱藏 Streamlit 原生元素 */
-    .stDeployButton {display:none;}
+    /* 時間與圓點 */
+    .time-display { font-size: 1.1rem; font-weight: 700; color: #444; text-align: right; margin-top: 15px; }
+    .timeline-dot {
+        width: 14px; height: 14px; background: white;
+        border: 3px solid #FF5A5F; border-radius: 50%;
+        margin: 18px auto 0 auto; position: relative; z-index: 2;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # -------------------------------------
-# 3. 初始化資料 (還原影片中的 Day 2 行程)
+# 3. 初始化資料 (範例資料)
 # -------------------------------------
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
-        1: [
-            {"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans"},
-        ],
-        2: [ # 影片中的主要內容
+        1: [{"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans", "note": ""}],
+        2: [
             {"id": 201, "time": "07:00", "title": "起床 & 早餐", "loc": "相鐵FRESA INN", "cost": 0, "cat": "stay", "note": "晨跑"},
             {"id": 202, "time": "08:00", "title": "移動：名古屋 → 上諏訪", "loc": "JR 特急 (信濃號)", "cost": 0, "cat": "trans", "note": "指定席"},
-            {"id": 203, "time": "10:30", "title": "放行李 / 租腳踏車", "loc": "ホテル紅や (Hotel Beni Ya)", "cost": 0, "cat": "stay", "note": "寄放行李 -> 租車"},
-            {"id": 204, "time": "11:30", "title": "午餐：鰻魚飯", "loc": "古色古香名店", "cost": 2000, "cat": "food", "note": "ねばし"},
-            {"id": 205, "time": "13:30", "title": "高島城跡", "loc": "高島城", "cost": 0, "cat": "play", "note": "諏訪護國神社 -> 八劍神社"},
-            {"id": 206, "time": "15:30", "title": "Check-in", "loc": "ホテル紅や", "cost": 0, "cat": "stay", "note": "入住手續"},
-            {"id": 207, "time": "18:00", "title": "晚餐：いずみ屋", "loc": "Izumiya", "cost": 1500, "cat": "food", "note": "居酒屋"},
-            {"id": 208, "time": "19:00", "title": "超市採購", "loc": "TSURUYA Kamisuwa", "cost": 420, "cat": "shop", "note": "飲料跟酒"},
+            {"id": 203, "time": "10:30", "title": "放行李", "loc": "ホテル紅や", "cost": 0, "cat": "stay", "note": "寄放行李"},
+            {"id": 204, "time": "11:30", "title": "午餐：鰻魚飯", "loc": "ねばし (古名店)", "cost": 2000, "cat": "food", "note": "排隊美食"},
+            {"id": 205, "time": "13:30", "title": "高島城跡", "loc": "高島城", "cost": 0, "cat": "play", "note": "散步拍照"},
+            {"id": 206, "time": "18:00", "title": "晚餐", "loc": "Izumiya", "cost": 1500, "cat": "food", "note": ""},
         ],
         3: [], 4: [], 5: [], 6: [], 7: []
     }
 
 # -------------------------------------
-# 4. 側邊欄與狀態控制
+# 4. 頂部資訊卡 (修復版)
 # -------------------------------------
-with st.sidebar:
-    st.header("⚙️ 設定")
-    # 編輯模式開關
-    is_edit_mode = st.toggle("✏️ 編輯模式", value=False)
-    st.write("開啟後可修改行程與金額")
-    
-    st.divider()
-    st.caption("長野・名古屋之旅")
+# 日期與資料
+days_map = {1: "週日", 2: "週一", 3: "週二", 4: "週三", 5: "週四", 6: "週五", 7: "週六"}
 
-# -------------------------------------
-# 5. 主畫面 - 頂部資訊卡 (Header)
-# -------------------------------------
-# 計算 Day 2 是週幾 (假設 Day 1 是週日)
-days_jp = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"]
-current_time_str = datetime.now().strftime("%H:%M") # 模擬影片左上角時間
+# Day 選擇器 (改用 Radio 但 CSS 已美化)
+selected_day = st.radio(
+    "選擇天數", [1, 2, 3, 4, 5, 6, 7], 
+    index=1, 
+    format_func=lambda x: f"Day {x}", 
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
-# 選擇天數 (模擬橫向 Tabs)
-st.write("") # Spacer
-day_cols = st.columns([1,1,1,1,1,1,1])
-selected_day = st.session_state.get("selected_day", 2)
-
-# 渲染日期按鈕 (簡單用 Streamlit 按鈕模擬)
-# 為了美觀，我們用 radio 的橫向模式來控制天數
-selected_day = st.radio("選擇天數", [1,2,3,4,5,6,7], index=1, horizontal=True, format_func=lambda x: f"Day {x}", label_visibility="collapsed")
-
-# 獲取當日資料
 current_items = st.session_state.trip_data[selected_day]
-daily_cost = sum(item['cost'] for item in current_items)
+total_cost = sum(i['cost'] for i in current_items)
+day_str = days_map.get(selected_day, "")
 
-# 頂部 HTML 渲染
-header_html = f"""
-<div class="header-container">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div>
-            <div class="big-time">11:35</div>
-            <div class="route-text">名古屋 🚄 上諏訪</div>
+# Header HTML
+st.markdown(f"""
+<div class="header-card">
+    <div class="header-top">
+        <div style="display:flex;">
+            <div class="header-time">11:35</div>
+            <div class="header-day">{day_str}</div>
         </div>
-        <div class="weather-badge">
-            <div class="temp-text">12°</div>
-            <div style="font-size:0.8rem;">舒適涼爽</div>
+        <div class="weather-box">
+            <div class="weather-temp">12°</div>
+            <div class="weather-desc">舒適涼爽</div>
         </div>
     </div>
-    <div style="position:absolute; top:25px; left:120px; font-size:1.2rem; color:#888;">{days_jp[selected_day % 7]}</div>
+    <div class="header-route">
+        <span>名古屋</span> ✈️ <span>上諏訪</span>
+    </div>
 </div>
-"""
-st.markdown(header_html, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # -------------------------------------
-# 6. 行程列表 (Timeline View)
+# 5. 行程列表 (Timeline Fix)
 # -------------------------------------
+col_head1, col_head2 = st.columns([3, 1])
+col_head1.caption(f"Day {selected_day} 行程 • 預算 ¥{total_cost:,}")
+is_edit = col_head2.checkbox("編輯", value=False)
 
-# 顯示工具列
-col_tools1, col_tools2 = st.columns([3, 1])
-with col_tools1:
-    st.markdown(f"**Day {selected_day} 行程** <span style='color:#888; margin-left:10px; font-size:0.9rem;'>預算 ¥{daily_cost:,}</span>", unsafe_allow_html=True)
-with col_tools2:
-    if is_edit_mode:
-        if st.button("➕ 新增", use_container_width=True):
-             # 簡單新增邏輯
-             new_id = int(datetime.now().timestamp())
-             st.session_state.trip_data[selected_day].append(
-                 {"id": new_id, "time": "00:00", "title": "新行程", "loc": "", "cost": 0, "cat": "other", "note": ""}
-             )
-             st.rerun()
+# 顏色對應
+cat_colors = {
+    "food": "#FF6B6B",   # 紅 (吃)
+    "trans": "#4ECDC4",  # 青 (行)
+    "stay": "#5E548E",   # 紫 (住)
+    "play": "#FFD93D",   # 黃 (玩)
+    "other": "#95A5A6"   # 灰 (其他)
+}
 
-st.markdown('<div class="timeline-container"><div class="timeline-line"></div>', unsafe_allow_html=True)
+st.markdown('<div class="timeline-wrapper"><div class="timeline-line"></div>', unsafe_allow_html=True)
 
 if not current_items:
-    st.info("本日尚無行程，請點擊編輯模式新增。")
+    st.info("😴 今天沒有行程")
 
-# 排序行程
-current_items.sort(key=lambda x: x['time'])
-
-for index, item in enumerate(current_items):
-    # 決定卡片左邊框顏色 (簡單分類)
-    cat_colors = {"food": "#FF6B6B", "trans": "#4ECDC4", "stay": "#5E548E", "play": "#FFD93D", "shop": "#FF8C42"}
-    color = cat_colors.get(item.get("cat", "other"), "#ccc")
+for idx, item in enumerate(current_items):
+    # 使用 columns 來切分：時間 | 圓點 | 卡片
+    # 比例調整為 [1.2, 0.3, 5] 確保時間不換行，圓點居中，卡片最大
+    c1, c2, c3 = st.columns([1.2, 0.3, 5])
     
-    # 建立一列 Layout
-    col_layout = st.columns([1.5, 0.5, 6]) # 時間, 點, 卡片內容
+    with c1:
+        st.markdown(f'<div class="time-display">{item["time"]}</div>', unsafe_allow_html=True)
     
-    with col_layout[0]: # 時間
-         st.markdown(f"<div class='time-col'>{item['time']}</div>", unsafe_allow_html=True)
+    with c2:
+        # 圓點顏色跟隨類別
+        dot_color = cat_colors.get(item.get("cat", "other"), "#999")
+        st.markdown(f'<div class="timeline-dot" style="border-color: {dot_color};"></div>', unsafe_allow_html=True)
     
-    with col_layout[1]: # 圓點
-         st.markdown(f"<div class='dot-col'><div class='dot'></div></div>", unsafe_allow_html=True)
-         
-    with col_layout[2]: # 卡片內容
-        if is_edit_mode:
-            # 編輯模式：顯示編輯器
-            with st.expander(f"📝 {item['title']}", expanded=False):
-                with st.container():
-                    c1, c2 = st.columns(2)
-                    new_title = c1.text_input("標題", item['title'], key=f"t_{item['id']}")
-                    new_time = c2.text_input("時間", item['time'], key=f"tm_{item['id']}")
-                    new_loc = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
-                    
-                    # 記帳功能 (模仿影片輸入金額)
-                    new_cost = st.number_input("金額 (¥)", value=item['cost'], step=100, key=f"c_{item['id']}")
-                    new_note = st.text_area("備註", item['note'], key=f"n_{item['id']}")
-                    
-                    col_act1, col_act2 = st.columns(2)
-                    if col_act1.button("保存", key=f"save_{item['id']}", type="primary"):
-                        item['title'] = new_title
-                        item['time'] = new_time
-                        item['loc'] = new_loc
-                        item['cost'] = int(new_cost)
-                        item['note'] = new_note
-                        st.rerun()
-                    if col_act2.button("刪除", key=f"del_{item['id']}"):
-                        st.session_state.trip_data[selected_day].pop(index)
-                        st.rerun()
+    with c3:
+        if is_edit:
+            # 編輯模式：使用 Expander 保持整潔
+            with st.expander(f"📝 {item['title']}", expanded=True):
+                new_title = st.text_input("標題", item['title'], key=f"t_{item['id']}")
+                c_a, c_b = st.columns(2)
+                new_time = c_a.text_input("時間", item['time'], key=f"tm_{item['id']}")
+                new_cost = c_b.number_input("金額", value=item['cost'], step=100, key=f"c_{item['id']}")
+                new_loc = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
+                
+                if st.button("保存", key=f"s_{item['id']}"):
+                    item.update({"title": new_title, "time": new_time, "cost": new_cost, "loc": new_loc})
+                    st.rerun()
         else:
-            # 瀏覽模式：顯示卡片
-            cost_html = f"<div class='item-cost'>¥{item['cost']:,}</div>" if item['cost'] > 0 else ""
-            loc_link = f"https://www.google.com/maps/search/?api=1&query={item['loc']}" if item['loc'] else "#"
+            # 瀏覽模式：純 HTML 卡片 (注意這裡的 f-string 結構已經簡化)
+            border_color = cat_colors.get(item.get("cat", "other"), "#ccc")
+            loc_html = f'<a href="https://www.google.com/maps/search/?api=1&query={item["loc"]}" target="_blank">{item["loc"]}</a>' if item['loc'] else "無地點"
+            price_html = f'<div class="card-price">¥{item["cost"]:,}</div>' if item["cost"] > 0 else ""
             
             card_html = f"""
-            <div class="content-card" style="border-left-color: {color};">
-                <div style="display:flex; justify-content:space-between;">
-                    <div class="item-title">{item['title']}</div>
-                    {cost_html}
+            <div class="trip-card" style="border-left-color: {border_color};">
+                <div class="card-header">
+                    <div class="card-title">{item['title']}</div>
+                    {price_html}
                 </div>
-                <div class="item-sub">📍 <a href="{loc_link}" target="_blank" class="map-link">{item['loc'] or '未設定地點'}</a></div>
-                <div style="font-size:0.8rem; color:#888; margin-top:5px;">{item['note']}</div>
+                <div class="card-loc">📍 {loc_html}</div>
+                <div class="card-note">{item['note']}</div>
             </div>
             """
             st.markdown(card_html, unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True) # End timeline container
-
-# -------------------------------------
-# 7. 底部統計
-# -------------------------------------
-if not is_edit_mode:
-    st.markdown("---")
-    st.caption(f"📊 目前總花費: ¥{daily_cost:,}")
+st.markdown('</div>', unsafe_allow_html=True)
