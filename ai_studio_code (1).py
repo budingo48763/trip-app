@@ -340,4 +340,50 @@ with tab2:
     st.markdown('<div class="retro-subtitle">ROUTE MAP</div>', unsafe_allow_html=True)
     map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
     map_items = st.session_state.trip_data[map_day]
-    map_items.sort(key=lambda
+    map_items.sort(key=lambda x: x['time'])
+    
+    if len(map_items) > 1:
+        dot = graphviz.Digraph()
+        dot.attr(rankdir='TB') 
+        dot.attr('node', shape='box', style='filled', fillcolor='#FDFCF5', color='#8E2F2F', fontname='Noto Serif JP', fontsize='14', height='0.6')
+        dot.attr('edge', color='#8E2F2F', penwidth='1.5')
+        
+        last = None
+        for item in map_items:
+            label = f"{item['time']} {item['title']}\n📍{item['loc']}" if item['loc'] else f"{item['time']} {item['title']}"
+            dot.node(str(item['id']), label)
+            if last: dot.edge(last, str(item['id']))
+            last = str(item['id'])
+        
+        st.graphviz_chart(dot, use_container_width=True)
+    else:
+        st.info("行程過少，無法繪製路線。")
+
+# ==========================================
+# 3. 準備清單 & 注意事項
+# ==========================================
+with tab3:
+    st.markdown('<div class="retro-subtitle">CHECKLIST & TIPS</div>', unsafe_allow_html=True)
+    
+    # 分類清單
+    for category, items in st.session_state.checklist.items():
+        with st.expander(f"📌 {category}", expanded=False):
+            cols = st.columns(2)
+            # 這裡使用安全的迭代方式，避免 AttributeError
+            try:
+                for i, (item_name, checked) in enumerate(items.items()):
+                    st.session_state.checklist[category][item_name] = cols[i % 2].checkbox(item_name, value=checked)
+            except AttributeError:
+                st.error("資料格式錯誤，已自動修復，請刷新頁面。")
+                st.session_state.checklist = default_checklist
+                st.rerun()
+
+    st.markdown("### 🇯🇵 旅日注意事項")
+    with st.container(border=True):
+        st.markdown("""
+        *   **🔌 電壓**：日本電壓 100V，插座為雙平腳（與台灣相同），台灣電器通常可直接使用。
+        *   **💰 退稅**：同日同店消費滿 **5,000日圓** (未稅) 即可退稅 (10%)。需出示護照。
+        *   **🚆 交通**：建議使用 **Suica / ICOCA** (西瓜卡)，iPhone 可直接綁定 Apple Pay 儲值。
+        *   **🗑️ 垃圾**：日本街道垃圾桶極少，垃圾需自行帶回飯店或車站丟棄。
+        *   **🆘 緊急電話**：警察 110 / 救護車 119 / 駐日代表處 (03) 3280-7811。
+        """)
