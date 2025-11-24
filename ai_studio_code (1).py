@@ -41,7 +41,16 @@ st.markdown("""
         font-family: 'Noto Serif JP', 'Times New Roman', serif !important;
     }
     
-    .stDeployButton, header {visibility: hidden;}
+    /* 1. 只隱藏 Deploy 按鈕，不要隱藏整個 header */
+    .stDeployButton {visibility: hidden;}
+    
+    /* 2. 確保 header 是可見的 (這樣手機版的側邊欄按鈕才會出現) */
+    header {visibility: visible !important;}
+
+    /* 3. 將 header 背景設為透明，讓它融入你的米色背景，避免出現一條白色橫條 */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
 
     /* =========================================
        1. 側邊欄導航
