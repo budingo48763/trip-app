@@ -42,14 +42,36 @@ st.markdown("""
     }
     
     /* 1. 只隱藏 Deploy 按鈕，不要隱藏整個 header */
-    .stDeployButton {visibility: hidden;}
+    /* === 🚀 手機版側邊欄按鈕強力修復開始 === */
     
-    /* 2. 確保 header 是可見的 (這樣手機版的側邊欄按鈕才會出現) */
-    header {visibility: visible !important;}
-
-    /* 3. 將 header 背景設為透明，讓它融入你的米色背景，避免出現一條白色橫條 */
+    /* 1. 強制顯示 Header，並將層級拉到最高 (確保不被其他元件擋住) */
     header[data-testid="stHeader"] {
+        visibility: visible !important;
         background-color: transparent !important;
+        z-index: 999999 !important; /* 關鍵：圖層置頂 */
+    }
+
+    /* 2. 隱藏 Deploy 按鈕 (右上角的火箭) 和 頂部的彩虹裝飾條 */
+    .stDeployButton, header[data-testid="stHeader"] > div:first-child {
+        visibility: hidden !important;
+        display: none !important;
+    }
+
+    /* 3. 強制設定「漢堡選單按鈕」的顏色與可見性 */
+    /* 這是最關鍵的一步：把按鈕改成你的主題紅色，防止它是白色的導致看不見 */
+    header[data-testid="stHeader"] button[kind="header"] {
+        visibility: visible !important;
+        color: #8E2F2F !important; /* 改成你的酒紅色 */
+        display: block !important;
+    }
+    
+    /* 確保 Toolbar 區域也是顯示的 */
+    div[data-testid="stToolbar"] {
+        visibility: visible !important;
+        display: flex !important;
+    }
+
+    /* === 🚀 手機版側邊欄按鈕強力修復結束 === */
     }
 
     /* =========================================
