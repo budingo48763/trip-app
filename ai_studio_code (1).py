@@ -10,25 +10,19 @@ import urllib.parse
 st.set_page_config(page_title="旅日計畫書", page_icon="⛩️", layout="centered")
 
 # ======================================================
-# 🆕 關鍵修復：定義新增明細的回調函數 (Callback)
-# 透過這個函數，保證在頁面刷新前，資料已加入且輸入框已清空
+# Callback 函數
 # ======================================================
 def add_expense_callback(item, name_key, price_key):
-    # 1. 從 session_state 獲取輸入值
     new_name = st.session_state.get(name_key, "")
     new_price = st.session_state.get(price_key, 0)
-    
     if new_name:
-        # 2. 更新資料
         item["expenses"].append({"name": new_name, "price": new_price})
-        item['cost'] = sum(x['price'] for x in item['expenses']) # 自動加總
-        
-        # 3. 強制清空輸入框 (這是最關鍵的一步)
+        item['cost'] = sum(x['price'] for x in item['expenses'])
         st.session_state[name_key] = ""
         st.session_state[price_key] = 0
 
 # -------------------------------------
-# 2. 日式復古風 CSS
+# 2. 日式復古風 CSS (含強制介面修正)
 # -------------------------------------
 st.markdown("""
     <style>
@@ -36,68 +30,68 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&display=swap');
     
     .stApp { 
-        background-color: #FDFCF5 !important; /* 米色紙張感 */
+        background-color: #FDFCF5 !important;
         color: #2B2B2B !important; 
         font-family: 'Noto Serif JP', 'Times New Roman', serif !important;
     }
+
+    /* =========================================================
+       🛑 介面清理 (隱藏右上角選單、右下角按鈕、Footer)
+       ========================================================= */
     
-    /* =========================================
-       🚀 手機側邊欄按鈕：高顯眼修復版
-       ========================================= */
+    /* 1. 隱藏右上角的功能區 (Deploy, Share, Three dots, GitHub) */
+    [data-testid="stHeaderActionElements"] {
+        display: none !important;
+    }
+    .stDeployButton {
+        display: none !important;
+    }
+
+    /* 2. 隱藏右下角的 "Manage app" 黑框按鈕與浮水印 */
+    footer, .stFooter {
+        display: none !important;
+    }
+    div[class*="viewerBadge"] {
+        display: none !important;
+    }
     
-    /* 1. 確保 Header 區域可見，但背景透明 */
+    /* 3. Header 背景透明，但保留左邊的按鈕空間 */
     header[data-testid="stHeader"] {
-        visibility: visible !important;
         background-color: transparent !important;
         z-index: 999999 !important;
     }
 
-    /* 2. 隱藏不必要的元素 (Deploy 按鈕、彩虹條) */
-    .stDeployButton, 
-    div[data-testid="stDecoration"] {
-        display: none !important;
-        visibility: hidden !important;
-    }
-
-    /* 3. 【關鍵】改造側邊欄開關按鈕 (讓它變大、變紅、變圓) */
+    /* =========================================================
+       🟢 側邊欄按鈕 (箭頭) 強力美化
+       ========================================================= */
+    
+    /* 針對側邊欄開關按鈕進行樣式重寫 */
     button[data-testid="stSidebarCollapsedControl"] {
-        visibility: visible !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        
-        /* 外觀設計：日式印章感 */
-        background-color: #FFFFFF !important;   /* 白底 */
-        border: 2px solid #8E2F2F !important;   /* 深紅框 */
-        border-radius: 50% !important;          /* 圓形 */
-        color: #8E2F2F !important;              /* 箭頭顏色 */
-        
-        /* 尺寸放大 */
-        width: 48px !important;
-        height: 48px !important;
-        margin-left: 10px !important;           /* 離左邊稍微遠一點 */
+        background-color: #FFFFFF !important;  /* 白底 */
+        border: 2px solid #8E2F2F !important;  /* 紅框 */
+        border-radius: 50% !important;         /* 圓形 */
+        width: 45px !important;                /* 增大 */
+        height: 45px !important;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
         margin-top: 5px !important;
-        
-        /* 加陰影讓它浮起來 */
-        box-shadow: 0 4px 6px rgba(142, 47, 47, 0.2) !important;
+        margin-left: 5px !important;
     }
 
-    /* 4. 加粗裡面的箭頭圖示 */
+    /* 針對按鈕裡面的 SVG 箭頭圖案變色 */
     button[data-testid="stSidebarCollapsedControl"] svg {
-        stroke: #8E2F2F !important;
-        stroke-width: 3px !important; /* 加粗線條 */
-        width: 24px !important;
+        fill: #8E2F2F !important;  /* 填充紅色 */
+        color: #8E2F2F !important; /* 線條紅色 */
+        width: 24px !important;    /* 圖示放大 */
         height: 24px !important;
+        stroke-width: 2px !important; /* 加粗 */
     }
 
-    /* 5. 按下去的效果 */
-    button[data-testid="stSidebarCollapsedControl"]:active {
-        background-color: #FDFCF5 !important;
-        transform: scale(0.95);
-    }
-    /* =========================================
-       1. 側邊欄導航
-       ========================================= */
+    /* =========================================================
+       其他樣式 (保持不變)
+       ========================================================= */
     section[data-testid="stSidebar"] div[role="radiogroup"] {
         display: flex; flex-direction: column; gap: 8px;
     }
@@ -116,9 +110,7 @@ st.markdown("""
         color: #8E2F2F !important;
     }
 
-    /* =========================================
-       2. 主畫面 Day 按鈕
-       ========================================= */
+    /* Day 按鈕 */
     .stMain div[role="radiogroup"] { 
         gap: 12px; padding: 10px 0; justify-content: center; display: flex; flex-wrap: wrap;
     }
@@ -133,18 +125,15 @@ st.markdown("""
         border-radius: 0px !important; box-shadow: none !important;
         padding: 0 !important; margin: 0 !important;
     }
-
     .stMain div[role="radiogroup"] label p {
         font-family: 'Times New Roman', 'Noto Serif JP', serif !important;
         text-align: center !important; white-space: pre-wrap !important;
         line-height: 1.2 !important; width: 100% !important; margin: 0 !important; display: block !important;
         font-size: 2rem !important; font-weight: 500 !important; color: #666 !important;
     }
-
     .stMain div[role="radiogroup"] label p::first-line {
         font-size: 0.8rem !important; color: #AAA !important; font-weight: 400 !important; line-height: 2 !important;
     }
-
     .stMain div[role="radiogroup"] label[data-checked="true"] {
         background-color: #8E2F2F !important; border: 1px solid #8E2F2F !important;
         box-shadow: 0 4px 10px rgba(142, 47, 47, 0.2) !important;
@@ -152,9 +141,7 @@ st.markdown("""
     .stMain div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     .stMain div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.7) !important; }
 
-    /* =========================================
-       3. 其他 UI
-       ========================================= */
+    /* UI 元件微調 */
     div[data-baseweb="input"], div[data-baseweb="base-input"] {
         background-color: transparent !important; border: none !important;
         border-bottom: 2px solid #8E2F2F !important; border-radius: 0 !important;
@@ -163,6 +150,15 @@ st.markdown("""
         color: #2B2B2B !important; font-weight: bold !important; background-color: transparent !important;
     }
     div[data-baseweb="timepicker"] { background-color: #FFF !important; }
+    
+    /* 編輯模式開關的樣式優化 */
+    div[data-testid="stToggle"] {
+        justify-content: center;
+        margin-bottom: 20px;
+        padding: 10px;
+        background: rgba(142, 47, 47, 0.05);
+        border-radius: 10px;
+    }
     
     /* 卡片設計 */
     .trip-card {
@@ -243,7 +239,8 @@ with st.sidebar:
     st.session_state.trip_title = st.text_input("旅程標題", value=st.session_state.trip_title)
     start_date = st.date_input("出發日期", value=datetime.today())
     trip_days_count = st.number_input("旅遊天數", 1, 30, 5)
-    is_edit_mode = st.toggle("✏️ 編輯模式", value=False)
+    
+    # ⚠️ [已移除] 編輯模式按鈕從這裡移除了
 
 for d in range(1, trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
@@ -255,6 +252,7 @@ if page == "📅 行程規劃":
     st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
     st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
 
+    # Day 選擇器
     selected_day_num = st.radio(
         "DaySelect", list(range(1, trip_days_count + 1)), 
         index=0, horizontal=True, label_visibility="collapsed",
@@ -271,9 +269,18 @@ if page == "📅 行程規劃":
     
     total_cost = sum(i['cost'] for i in current_items)
     
-    c_info1, c_info2 = st.columns([2, 1])
-    c_info1.markdown(f"### 🗓️ {date_str} {week_str}")
-    c_info2.markdown(f"<div style='text-align:right; color:#8E2F2F; font-weight:bold; padding-top:10px;'>本日預算 ¥{total_cost:,}</div>", unsafe_allow_html=True)
+    # ----------------------------------------------------
+    # 🆕 新功能位置：編輯模式開關移到這裡 (中間)
+    # ----------------------------------------------------
+    st.markdown("") # 空行
+    c_date, c_edit = st.columns([2, 1])
+    with c_date:
+        st.markdown(f"### 🗓️ {date_str} {week_str}")
+    with c_edit:
+        # 這裡放置編輯模式開關
+        is_edit_mode = st.toggle("✏️ 編輯", value=False)
+
+    st.markdown(f"<div style='text-align:right; color:#8E2F2F; font-weight:bold; padding-top:10px;'>本日預算 ¥{total_cost:,}</div>", unsafe_allow_html=True)
 
     if is_edit_mode:
         if st.button("➕ 新增行程", type="primary", use_container_width=True):
@@ -287,7 +294,7 @@ if page == "📅 行程規劃":
     current_items.sort(key=lambda x: x['time'])
     
     if not current_items:
-        st.info("🍵 請點擊編輯模式開始規劃行程。")
+        st.info("🍵 請開啟上方的「✏️ 編輯」並點擊新增行程。")
 
     for index, item in enumerate(current_items):
         c_time, c_card = st.columns([1.2, 4])
@@ -335,12 +342,8 @@ if page == "📅 行程規劃":
                                 item['cost'] = sum(x['price'] for x in item['expenses'])
                                 st.rerun()
 
-                    # ==========================================================
-                    # ⚠️ 關鍵修正：輸入後自動清空 (使用 on_click 回調)
-                    # ==========================================================
+                    # 新增明細
                     c_add1, c_add2, c_add3 = st.columns([3, 2, 1])
-                    
-                    # 定義 Key
                     name_key = f"new_exp_name_{item['id']}"
                     price_key = f"new_exp_price_{item['id']}"
 
@@ -348,9 +351,7 @@ if page == "📅 行程規劃":
                         st.text_input("項目", key=name_key, placeholder="例: 飲料", label_visibility="collapsed")
                     with c_add2:
                         st.number_input("金額", key=price_key, min_value=0, step=100, label_visibility="collapsed")
-                    
                     with c_add3:
-                        # ⚠️ 將邏輯綁定到 on_click，這是最穩定的解法
                         st.button(
                             "➕", 
                             key=f"btn_add_{item['id']}", 
@@ -398,7 +399,7 @@ if page == "📅 行程規劃":
         route_url = generate_google_map_route(current_items)
         st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
 
-# ... (路線全覽與準備清單程式碼與前一版相同) ...
+# ... (其餘頁面邏輯) ...
 elif page == "🗺️ 路線全覽":
     st.markdown('<div class="retro-title">路線地圖</div>', unsafe_allow_html=True)
     map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
