@@ -39,7 +39,6 @@ def generate_google_map_route(items):
     locations = [urllib.parse.quote(item['loc']) for item in items if item['loc']]
     return base_url + "/".join(locations) if locations else "#"
 
-# 根據分類回傳對應的日式 Emoji
 def get_category_icon(cat):
     icons = {
         "trans": "🚃", # 交通
@@ -114,7 +113,7 @@ st.markdown("""
     div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.8) !important; }
 
-    /* 卡片樣式 */
+    /* 行程卡片樣式 */
     .trip-card {
         background: #FFFFFF; border: 1px solid #EBE6DE; border-left: 6px solid #8E2F2F;
         padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05); position: relative; 
@@ -139,85 +138,44 @@ st.markdown("""
         position: relative;
         max-width: 100%;
         margin: 20px auto;
-        padding-left: 30px; /* 留空間給左邊的線 */
+        padding-left: 30px; 
     }
     
-    /* 垂直虛線 */
     .timeline-container::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 14px; /* 線的位置 */
-        width: 2px;
+        content: ''; position: absolute; top: 0; bottom: 0; left: 14px; width: 2px;
         background-image: linear-gradient(#8E2F2F 40%, rgba(255,255,255,0) 0%);
-        background-position: right;
-        background-size: 2px 12px; /* 虛線間距 */
-        background-repeat: repeat-y;
+        background-position: right; background-size: 2px 12px; background-repeat: repeat-y;
     }
 
-    .timeline-item {
-        position: relative;
-        margin-bottom: 25px;
-        animation: fadeInUp 0.6s ease-in-out both; /* 動畫 */
-    }
-    
-    /* 為每個項目增加延遲，製造依序出現的效果 */
+    .timeline-item { position: relative; margin-bottom: 25px; animation: fadeInUp 0.6s ease-in-out both; }
     .timeline-item:nth-child(1) { animation-delay: 0.1s; }
     .timeline-item:nth-child(2) { animation-delay: 0.2s; }
     .timeline-item:nth-child(3) { animation-delay: 0.3s; }
     .timeline-item:nth-child(4) { animation-delay: 0.4s; }
     .timeline-item:nth-child(5) { animation-delay: 0.5s; }
     .timeline-item:nth-child(6) { animation-delay: 0.6s; }
-    .timeline-item:nth-child(7) { animation-delay: 0.7s; }
-    .timeline-item:nth-child(8) { animation-delay: 0.8s; }
 
-    /* 圓形圖標 */
     .timeline-icon {
-        position: absolute;
-        left: -31px; /* 調整到線的中間 */
-        top: 0px;
-        width: 32px;
-        height: 32px;
-        background: #FFFFFF;
-        border: 2px solid #8E2F2F;
-        border-radius: 50%;
-        text-align: center;
-        line-height: 28px;
-        font-size: 16px;
-        z-index: 2;
+        position: absolute; left: -31px; top: 0px; width: 32px; height: 32px;
+        background: #FFFFFF; border: 2px solid #8E2F2F; border-radius: 50%;
+        text-align: center; line-height: 28px; font-size: 16px; z-index: 2;
         box-shadow: 0 2px 4px rgba(142, 47, 47, 0.2);
     }
 
-    /* 內容卡片 */
     .timeline-content {
-        background: #FFFFFF;
-        border: 1px solid #E0E0E0;
-        border-left: 4px solid #8E2F2F;
-        padding: 12px 15px;
-        border-radius: 4px;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.05);
+        background: #FFFFFF; border: 1px solid #E0E0E0; border-left: 4px solid #8E2F2F;
+        padding: 12px 15px; border-radius: 4px; box-shadow: 0 3px 6px rgba(0,0,0,0.05);
         transition: transform 0.2s;
     }
-
-    .timeline-content:hover {
-        transform: scale(1.02); /* 滑鼠懸停放大 */
-        box-shadow: 0 5px 12px rgba(142, 47, 47, 0.15);
-    }
+    .timeline-content:hover { transform: scale(1.02); box-shadow: 0 5px 12px rgba(142, 47, 47, 0.15); }
 
     .tl-time { font-weight: 700; color: #8E2F2F; font-size: 1.1rem; font-family: 'Noto Serif JP', serif; }
     .tl-title { font-weight: 900; color: #2B2B2B; font-size: 1.05rem; margin-top: 2px; }
     .tl-loc { font-size: 0.85rem; color: #666; margin-top: 4px; display: flex; align-items: center; gap: 4px;}
 
     @keyframes fadeInUp {
-        from {
-            opacity: 0;
-            transform: translate3d(0, 20px, 0);
-        }
-        to {
-            opacity: 1;
-            transform: translate3d(0, 0, 0);
-        }
+        from { opacity: 0; transform: translate3d(0, 20px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
     }
 
     /* 其他 UI */
@@ -233,7 +191,6 @@ st.markdown("""
 if "trip_title" not in st.session_state:
     st.session_state.trip_title = "長野・名古屋"
 
-# 更新資料結構：確保每個項目都有 'cat' (分類)
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
         1: [{"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans", "note": "", "expenses": []}],
@@ -245,13 +202,12 @@ if "trip_data" not in st.session_state:
         ]
     }
 
-# 自動修復與補齊 'cat' 欄位
+# 自動補齊分類欄位
 for day, items in st.session_state.trip_data.items():
     for item in items:
-        if "cat" not in item:
-            item["cat"] = "other"
+        if "cat" not in item: item["cat"] = "other"
 
-# 預設清單
+# 自動修復清單格式
 default_checklist = {
     "必要證件": {"護照 (效期6個月以上)": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False, "信用卡 (JCB/Visa)": False, "海外提款卡": False},
     "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭 (日本雙孔扁插)": False, "耳機": False},
@@ -340,7 +296,7 @@ with tab1:
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
                     c2.markdown(f"**💰 ¥{item['cost']:,}**")
                     
-                    # 分類選單 (編輯模式下選擇)
+                    # 分類選擇
                     item['cat'] = st.selectbox("分類", ["trans", "food", "stay", "spot", "shop", "other"], 
                                                index=["trans", "food", "stay", "spot", "shop", "other"].index(item.get('cat', 'other')),
                                                format_func=lambda x: {"trans":"🚃 交通", "food":"🍱 美食", "stay":"♨️ 住宿", "spot":"⛩️ 景點", "shop":"🛍️ 購物", "other":"📍 其他"}[x],
@@ -366,7 +322,7 @@ with tab1:
                     with c_add2: st.number_input("金額", key=f"pr_{item['id']}", min_value=0, step=100, label_visibility="collapsed")
                     with c_add3: st.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item, f"nm_{item['id']}", f"pr_{item['id']}"))
             else:
-                # 瀏覽模式
+                # 瀏覽模式 HTML 組裝 (修正縮排問題)
                 weather_html = ""
                 if item['loc']:
                     w_icon, w_temp = get_mock_weather(item['loc'], date_str)
@@ -390,7 +346,7 @@ with tab1:
                 if note_content:
                     note_html = f"<div class='card-note'>{note_content}</div>"
 
-                # HTML 單行串接
+                # 單行串接，絕對安全
                 card_html = f"<div class='trip-card'>{weather_html}<div class='card-header'><div class='card-title-group'><div class='card-title'>{item['title']}</div>{price_html}</div></div>{loc_html}{note_html}</div>"
                 st.markdown(card_html, unsafe_allow_html=True)
                 
@@ -410,14 +366,22 @@ with tab2:
     map_items.sort(key=lambda x: x['time'])
     
     if len(map_items) > 0:
-        # 組合 HTML 結構
         timeline_html = '<div class="timeline-container">'
-        
         for item in map_items:
             icon = get_category_icon(item.get('cat', 'other'))
             loc_text = f"📍 {item['loc']}" if item['loc'] else ""
             
-            # 單行 HTML 避免縮排問題
-            timeline_html += f"""
-            <div class="timeline-item">
-                <div class="t
+            # 使用單行 f-string 串接，避免 SyntaxError
+            timeline_html += f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div><div class='timeline-content'><div class='tl-time'>{item['time']}</div><div class='tl-title'>{item['title']}</div><div class='tl-loc'>{loc_text}</div></div></div>"
+            
+        timeline_html += '</div>'
+        st.markdown(timeline_html, unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsafe_allow_html=True)
+    else:
+        st.info("🌸 本日尚無行程，請去規劃頁面添加！")
+
+# ==========================================
+# 3. 準備清單 & 注意事項
+# ==========================================
+with tab3:
+    st.markdown('<div cl
