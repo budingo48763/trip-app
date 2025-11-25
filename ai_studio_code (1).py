@@ -51,7 +51,7 @@ def get_category_icon(cat):
     return icons.get(cat, "📍")
 
 # -------------------------------------
-# 3. CSS 樣式 (含動態時間軸)
+# 3. CSS 樣式
 # -------------------------------------
 st.markdown("""
     <style>
@@ -113,7 +113,7 @@ st.markdown("""
     div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.8) !important; }
 
-    /* 行程卡片樣式 */
+    /* 卡片樣式 */
     .trip-card {
         background: #FFFFFF; border: 1px solid #EBE6DE; border-left: 6px solid #8E2F2F;
         padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05); position: relative; 
@@ -131,22 +131,13 @@ st.markdown("""
     .retro-title { font-size: 2.5rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; margin-top: 10px;}
     .retro-subtitle { font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 10px; }
     
-    /* =========================================
-       🎨 動態日式時間軸 CSS
-       ========================================= */
-    .timeline-container {
-        position: relative;
-        max-width: 100%;
-        margin: 20px auto;
-        padding-left: 30px; 
-    }
-    
+    /* 動態時間軸 CSS */
+    .timeline-container { position: relative; max-width: 100%; margin: 20px auto; padding-left: 30px; }
     .timeline-container::before {
         content: ''; position: absolute; top: 0; bottom: 0; left: 14px; width: 2px;
         background-image: linear-gradient(#8E2F2F 40%, rgba(255,255,255,0) 0%);
         background-position: right; background-size: 2px 12px; background-repeat: repeat-y;
     }
-
     .timeline-item { position: relative; margin-bottom: 25px; animation: fadeInUp 0.6s ease-in-out both; }
     .timeline-item:nth-child(1) { animation-delay: 0.1s; }
     .timeline-item:nth-child(2) { animation-delay: 0.2s; }
@@ -154,29 +145,22 @@ st.markdown("""
     .timeline-item:nth-child(4) { animation-delay: 0.4s; }
     .timeline-item:nth-child(5) { animation-delay: 0.5s; }
     .timeline-item:nth-child(6) { animation-delay: 0.6s; }
-
     .timeline-icon {
         position: absolute; left: -31px; top: 0px; width: 32px; height: 32px;
         background: #FFFFFF; border: 2px solid #8E2F2F; border-radius: 50%;
         text-align: center; line-height: 28px; font-size: 16px; z-index: 2;
         box-shadow: 0 2px 4px rgba(142, 47, 47, 0.2);
     }
-
     .timeline-content {
         background: #FFFFFF; border: 1px solid #E0E0E0; border-left: 4px solid #8E2F2F;
-        padding: 12px 15px; border-radius: 4px; box-shadow: 0 3px 6px rgba(0,0,0,0.05);
-        transition: transform 0.2s;
+        padding: 12px 15px; border-radius: 4px; box-shadow: 0 3px 6px rgba(0,0,0,0.05); transition: transform 0.2s;
     }
     .timeline-content:hover { transform: scale(1.02); box-shadow: 0 5px 12px rgba(142, 47, 47, 0.15); }
-
     .tl-time { font-weight: 700; color: #8E2F2F; font-size: 1.1rem; font-family: 'Noto Serif JP', serif; }
     .tl-title { font-weight: 900; color: #2B2B2B; font-size: 1.05rem; margin-top: 2px; }
     .tl-loc { font-size: 0.85rem; color: #666; margin-top: 4px; display: flex; align-items: center; gap: 4px;}
 
-    @keyframes fadeInUp {
-        from { opacity: 0; transform: translate3d(0, 20px, 0); }
-        to { opacity: 1; transform: translate3d(0, 0, 0); }
-    }
+    @keyframes fadeInUp { from { opacity: 0; transform: translate3d(0, 20px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
 
     /* 其他 UI */
     div[data-baseweb="input"], div[data-baseweb="base-input"] { border: none !important; border-bottom: 2px solid #8E2F2F !important; background: transparent !important; }
@@ -202,12 +186,10 @@ if "trip_data" not in st.session_state:
         ]
     }
 
-# 自動補齊分類欄位
 for day, items in st.session_state.trip_data.items():
     for item in items:
         if "cat" not in item: item["cat"] = "other"
 
-# 自動修復清單格式
 default_checklist = {
     "必要證件": {"護照 (效期6個月以上)": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False, "信用卡 (JCB/Visa)": False, "海外提款卡": False},
     "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭 (日本雙孔扁插)": False, "耳機": False},
@@ -296,7 +278,6 @@ with tab1:
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
                     c2.markdown(f"**💰 ¥{item['cost']:,}**")
                     
-                    # 分類選擇
                     item['cat'] = st.selectbox("分類", ["trans", "food", "stay", "spot", "shop", "other"], 
                                                index=["trans", "food", "stay", "spot", "shop", "other"].index(item.get('cat', 'other')),
                                                format_func=lambda x: {"trans":"🚃 交通", "food":"🍱 美食", "stay":"♨️ 住宿", "spot":"⛩️ 景點", "shop":"🛍️ 購物", "other":"📍 其他"}[x],
@@ -322,33 +303,42 @@ with tab1:
                     with c_add2: st.number_input("金額", key=f"pr_{item['id']}", min_value=0, step=100, label_visibility="collapsed")
                     with c_add3: st.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item, f"nm_{item['id']}", f"pr_{item['id']}"))
             else:
-                # 瀏覽模式 HTML 組裝 (修正縮排問題)
-                weather_html = ""
+                # 安全建構 HTML (拆解成多行變數，防止字串太長導致 SyntaxError)
+                html_parts = []
+                html_parts.append(f"<div class='trip-card'>")
+                
+                # 天氣標籤
                 if item['loc']:
                     w_icon, w_temp = get_mock_weather(item['loc'], date_str)
-                    weather_html = f"<div class='weather-tag'>{w_icon} {w_temp}</div>"
-
-                price_html = ""
+                    html_parts.append(f"<div class='weather-tag'>{w_icon} {w_temp}</div>")
+                
+                # 卡片標題與價格
+                html_parts.append("<div class='card-header'><div class='card-title-group'>")
+                html_parts.append(f"<div class='card-title'>{item['title']}</div>")
                 if item['cost'] > 0:
-                    price_html = f"<div class='card-price'>¥{item['cost']:,}</div>"
+                    html_parts.append(f"<div class='card-price'>¥{item['cost']:,}</div>")
+                html_parts.append("</div></div>")
                 
-                loc_html = ""
+                # 地點
                 if item['loc']:
-                    safe_loc_query = urllib.parse.quote(item['loc'])
-                    loc_html = f"<div class='card-loc'>📍 <a href='https://www.google.com/maps/search/?api=1&query={safe_loc_query}' target='_blank'>{item['loc']}</a></div>"
-
-                note_html = ""
-                note_content = item['note']
-                if item['expenses']:
-                    exp_list = "".join([f"<div style='display:flex; justify-content:space-between;'><span>• {e['name']}</span><span>¥{e['price']:,}</span></div>" for e in item['expenses']])
-                    note_content += f"<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; font-size:0.85rem; color:#555;'>{exp_list}</div>"
+                    safe_loc = urllib.parse.quote(item['loc'])
+                    html_parts.append(f"<div class='card-loc'>📍 <a href='https://www.google.com/maps/search/?api=1&query={safe_loc}' target='_blank'>{item['loc']}</a></div>")
                 
-                if note_content:
-                    note_html = f"<div class='card-note'>{note_content}</div>"
-
-                # 單行串接，絕對安全
-                card_html = f"<div class='trip-card'>{weather_html}<div class='card-header'><div class='card-title-group'><div class='card-title'>{item['title']}</div>{price_html}</div></div>{loc_html}{note_html}</div>"
-                st.markdown(card_html, unsafe_allow_html=True)
+                # 備註與明細
+                note_text = item['note']
+                exp_html = ""
+                if item['expenses']:
+                    for e in item['expenses']:
+                        exp_html += f"<div style='display:flex; justify-content:space-between;'><span>• {e['name']}</span><span>¥{e['price']:,}</span></div>"
+                
+                if note_text or exp_html:
+                    html_parts.append(f"<div class='card-note'>{note_text}")
+                    if exp_html:
+                        html_parts.append(f"<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; font-size:0.85rem; color:#555;'>{exp_html}</div>")
+                    html_parts.append("</div>")
+                
+                html_parts.append("</div>")
+                st.markdown("".join(html_parts), unsafe_allow_html=True)
                 
     st.markdown('</div>', unsafe_allow_html=True)
     if current_items:
@@ -366,22 +356,20 @@ with tab2:
     map_items.sort(key=lambda x: x['time'])
     
     if len(map_items) > 0:
-        timeline_html = '<div class="timeline-container">'
+        # 使用陣列串接 HTML，避免長字串錯誤
+        tl_parts = []
+        tl_parts.append('<div class="timeline-container">')
+        
         for item in map_items:
             icon = get_category_icon(item.get('cat', 'other'))
             loc_text = f"📍 {item['loc']}" if item['loc'] else ""
             
-            # 使用單行 f-string 串接，避免 SyntaxError
-            timeline_html += f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div><div class='timeline-content'><div class='tl-time'>{item['time']}</div><div class='tl-title'>{item['title']}</div><div class='tl-loc'>{loc_text}</div></div></div>"
+            tl_parts.append(f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div>")
+            tl_parts.append(f"<div class='timeline-content'><div class='tl-time'>{item['time']}</div>")
+            tl_parts.append(f"<div class='tl-title'>{item['title']}</div>")
+            tl_parts.append(f"<div class='tl-loc'>{loc_text}</div></div></div>")
             
-        timeline_html += '</div>'
-        st.markdown(timeline_html, unsafe_allow_html=True)
-        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsafe_allow_html=True)
-    else:
-        st.info("🌸 本日尚無行程，請去規劃頁面添加！")
-
-# ==========================================
-# 3. 準備清單 & 注意事項
-# ==========================================
-with tab3:
-    st.markdown('<div cl
+        tl_parts.append('</div>')
+        st.markdown("".join(tl_parts), unsafe_allow_html=True)
+        
+        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsa
