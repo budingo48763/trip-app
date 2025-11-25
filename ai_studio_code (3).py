@@ -122,6 +122,7 @@ st.markdown("""
     .card-title-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .card-title { font-size: 1.3rem; font-weight: 900; color: #2B2B2B; margin: 0; }
     .card-price { background: #8E2F2F; color: white; padding: 3px 8px; font-size: 0.85rem; border-radius: 4px; font-weight: bold; white-space: nowrap; }
+    .price-twd { font-size: 0.75rem; color: rgba(255,255,255,0.8); margin-left: 4px; font-weight: normal;}
     .weather-tag { position: absolute; top: 15px; right: 15px; background: #FDFCF5; padding: 2px 6px; border-radius: 4px; font-weight:bold; color:#555;}
     .card-loc { margin-top: 5px; }
     .card-loc a { color: #8E2F2F; text-decoration: none; border-bottom: 1px solid #8E2F2F; font-weight: bold;}
@@ -175,6 +176,10 @@ st.markdown("""
 if "trip_title" not in st.session_state:
     st.session_state.trip_title = "長野・名古屋"
 
+# 初始化匯率 (若無則預設 0.215)
+if "exchange_rate" not in st.session_state:
+    st.session_state.exchange_rate = 0.215
+
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
         1: [{"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans", "note": "", "expenses": []}],
@@ -205,9 +210,14 @@ if "checklist" not in st.session_state or not isinstance(st.session_state.checkl
 st.markdown(f'<div class="retro-title">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
 st.markdown('<div class="retro-subtitle">CLASSIC TRIP PLANNER</div>', unsafe_allow_html=True)
 
-with st.expander("⚙️ 旅程設定"):
+with st.expander("⚙️ 旅程設定 (匯率/標題)"):
     st.session_state.trip_title = st.text_input("旅程標題", value=st.session_state.trip_title)
-    start_date = st.date_input("出發日期", value=datetime.today())
+    # 新增匯率設定
+    c_set1, c_set2 = st.columns(2)
+    with c_set1:
+        start_date = st.date_input("出發日期", value=datetime.today())
+    with c_set2:
+        st.session_state.exchange_rate = st.number_input("匯率 (JPY→TWD)", value=st.session_state.exchange_rate, step=0.001, format="%.3f")
     trip_days_count = st.number_input("旅遊天數", 1, 30, 5)
 
 for d in range(1, trip_days_count + 1):
@@ -234,6 +244,7 @@ with tab1:
         if "expenses" not in item: item["expenses"] = []
     
     total_cost = sum(i['cost'] for i in current_items)
+    total_cost_twd = int(total_cost * st.session_state.exchange_rate)
     
     c_date, c_edit = st.columns([2, 1])
     with c_date:
@@ -241,7 +252,13 @@ with tab1:
     with c_edit:
         is_edit_mode = st.toggle("✏️ 編輯", value=False)
 
-    st.markdown(f"<div style='text-align:right; color:#8E2F2F; font-weight:bold; padding-top:5px; margin-bottom:15px;'>本日預算 ¥{total_cost:,}</div>", unsafe_allow_html=True)
+    # 顯示總金額 (含台幣換算)
+    st.markdown(f"""
+    <div style='text-align:right; font-weight:bold; padding-top:5px; margin-bottom:15px;'>
+        <span style='color:#8E2F2F; font-size:1.2rem;'>¥{total_cost:,}</span>
+        <span style='color:#999; font-size:0.9rem; margin-left:5px;'>(約 NT${total_cost_twd:,})</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     if is_edit_mode:
         if st.button("➕ 新增行程", type="primary", use_container_width=True):
@@ -276,7 +293,10 @@ with tab1:
                     try: t_obj = datetime.strptime(item['time'], "%H:%M").time()
                     except: t_obj = datetime.strptime("09:00", "%H:%M").time()
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
-                    c2.markdown(f"**💰 ¥{item['cost']:,}**")
+                    
+                    # 編輯模式顯示總金額 (含台幣)
+                    item_twd = int(item['cost'] * st.session_state.exchange_rate)
+                    c2.markdown(f"**💰 ¥{item['cost']:,}** <span style='font-size:0.8rem; color:#666'>(NT${item_twd:,})</span>", unsafe_allow_html=True)
                     
                     item['cat'] = st.selectbox("分類", ["trans", "food", "stay", "spot", "shop", "other"], 
                                                index=["trans", "food", "stay", "spot", "shop", "other"].index(item.get('cat', 'other')),
@@ -291,8 +311,9 @@ with tab1:
                     if item["expenses"]:
                         for idx, exp in enumerate(item["expenses"]):
                             ce1, ce2, ce3 = st.columns([3, 2, 1])
+                            exp_twd = int(exp['price'] * st.session_state.exchange_rate)
                             ce1.text(f"{exp['name']}")
-                            ce2.text(f"¥{exp['price']:,}")
+                            ce2.text(f"¥{exp['price']:,} (NT${exp_twd:,})")
                             if ce3.button("✖", key=f"d_exp_{item['id']}_{idx}"):
                                 item["expenses"].pop(idx)
                                 item['cost'] = sum(x['price'] for x in item['expenses'])
@@ -311,8 +332,11 @@ with tab1:
                 
                 h.append("<div class='card-header'><div class='card-title-group'>")
                 h.append(f"<div class='card-title'>{item['title']}</div>")
+                
+                # 卡片顯示台幣金額
                 if item['cost'] > 0:
-                    h.append(f"<div class='card-price'>¥{item['cost']:,}</div>")
+                    card_twd = int(item['cost'] * st.session_state.exchange_rate)
+                    h.append(f"<div class='card-price'>¥{item['cost']:,}<span class='price-twd'>(NT${card_twd:,})</span></div>")
                 h.append("</div></div>")
                 
                 if item['loc']:
@@ -323,7 +347,8 @@ with tab1:
                 exp_html = ""
                 if item['expenses']:
                     for e in item['expenses']:
-                        exp_html += f"<div style='display:flex; justify-content:space-between;'><span>• {e['name']}</span><span>¥{e['price']:,}</span></div>"
+                        e_twd = int(e['price'] * st.session_state.exchange_rate)
+                        exp_html += f"<div style='display:flex; justify-content:space-between;'><span>• {e['name']}</span><span>¥{e['price']:,} <span style='color:#999; font-size:0.75rem'>(NT${e_twd:,})</span></span></div>"
                 
                 if note_text or exp_html:
                     h.append(f"<div class='card-note'>{note_text}")
@@ -345,54 +370,4 @@ with tab1:
 # ==========================================
 with tab2:
     st.markdown('<div class="retro-subtitle">ILLUSTRATED ROUTE MAP</div>', unsafe_allow_html=True)
-    map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
-    map_items = st.session_state.trip_data[map_day]
-    map_items.sort(key=lambda x: x['time'])
-    
-    if len(map_items) > 0:
-        t_html = []
-        t_html.append('<div class="timeline-container">')
-        
-        for item in map_items:
-            icon = get_category_icon(item.get('cat', 'other'))
-            loc_text = f"📍 {item['loc']}" if item['loc'] else ""
-            t_html.append(f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div>")
-            t_html.append(f"<div class='timeline-content'><div class='tl-time'>{item['time']}</div>")
-            t_html.append(f"<div class='tl-title'>{item['title']}</div>")
-            t_html.append(f"<div class='tl-loc'>{loc_text}</div></div></div>")
-            
-        t_html.append('</div>')
-        st.markdown("".join(t_html), unsafe_allow_html=True)
-        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsafe_allow_html=True)
-    else:
-        st.info("🌸 本日尚無行程，請去規劃頁面添加！")
-
-# ==========================================
-# 3. 準備清單 & 注意事項
-# ==========================================
-with tab3:
-    st.markdown('<div class="retro-subtitle">CHECKLIST & TIPS</div>', unsafe_allow_html=True)
-    
-    try:
-        for category, items in st.session_state.checklist.items():
-            with st.expander(f"📌 {category}", expanded=False):
-                cols = st.columns(2)
-                for i, (item_name, checked) in enumerate(items.items()):
-                    st.session_state.checklist[category][item_name] = cols[i % 2].checkbox(item_name, value=checked)
-    except:
-        st.error("偵測到資料更新，已自動修復清單格式。")
-        st.session_state.checklist = default_checklist
-        st.rerun()
-
-    st.markdown("### 🇯🇵 旅日注意事項")
-    with st.container(border=True):
-        tips_html = """
-        <ul>
-        <li><b>🔌 電壓</b>：日本電壓 100V，插座為雙平腳（與台灣相同）。</li>
-        <li><b>💰 退稅</b>：同日同店消費滿 <b>5,000日圓</b> (未稅) 可退稅 10%。</li>
-        <li><b>🚆 交通</b>：建議使用 <b>Suica / ICOCA</b> 綁定 Apple Pay。</li>
-        <li><b>🗑️ 垃圾</b>：街道垃圾桶極少，請自行帶回飯店。</li>
-        <li><b>🆘 緊急電話</b>：警察 110 / 救護車 119。</li>
-        </ul>
-        """
-        st.markdown(tips_html, unsafe_allow_html=True)
+    map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1
