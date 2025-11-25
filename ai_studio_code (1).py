@@ -271,7 +271,7 @@ with tab1:
                     with c_add2: st.number_input("金額", key=f"pr_{item['id']}", min_value=0, step=100, label_visibility="collapsed")
                     with c_add3: st.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item, f"nm_{item['id']}", f"pr_{item['id']}"))
             else:
-                # 瀏覽模式：安全建構 HTML
+                # 瀏覽模式：移除多行字串，改用單行串接，徹底杜絕縮排問題
                 weather_html = ""
                 if item['loc']:
                     w_icon, w_temp = get_mock_weather(item['loc'], date_str)
@@ -283,7 +283,6 @@ with tab1:
                 
                 loc_html = ""
                 if item['loc']:
-                    # 使用 urllib.parse.quote 確保網址內的特殊字元（如空格、引號）被正確編碼，避免 HTML 崩壞
                     safe_loc_query = urllib.parse.quote(item['loc'])
                     loc_html = f"<div class='card-loc'>📍 <a href='https://www.google.com/maps/search/?api=1&query={safe_loc_query}' target='_blank'>{item['loc']}</a></div>"
 
@@ -296,19 +295,8 @@ with tab1:
                 if note_content:
                     note_html = f"<div class='card-note'>{note_content}</div>"
 
-                # 使用 f-string 組裝，注意不要縮排導致格式跑掉
-                card_html = f"""
-<div class="trip-card">
-    {weather_html}
-    <div class="card-header">
-        <div class="card-title-group">
-            <div class="card-title">{item["title"]}</div>
-            {price_html}
-        </div>
-    </div>
-    {loc_html}
-    {note_html}
-</div>"""
+                # ⚠️ 關鍵修正：將 HTML 組裝成單一行，不要換行，避免縮排錯誤
+                card_html = f"<div class='trip-card'>{weather_html}<div class='card-header'><div class='card-title-group'><div class='card-title'>{item['title']}</div>{price_html}</div></div>{loc_html}{note_html}</div>"
                 st.markdown(card_html, unsafe_allow_html=True)
                 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -356,7 +344,6 @@ with tab3:
                 for i, (item_name, checked) in enumerate(items.items()):
                     st.session_state.checklist[category][item_name] = cols[i % 2].checkbox(item_name, value=checked)
     except:
-        # 防止舊資料結構導致報錯
         st.error("偵測到資料更新，已自動修復清單格式。")
         st.session_state.checklist = default_checklist
         st.rerun()
