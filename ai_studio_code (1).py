@@ -113,7 +113,7 @@ st.markdown("""
     div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.8) !important; }
 
-    /* 卡片樣式 */
+    /* 行程卡片樣式 */
     .trip-card {
         background: #FFFFFF; border: 1px solid #EBE6DE; border-left: 6px solid #8E2F2F;
         padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05); position: relative; 
@@ -303,28 +303,23 @@ with tab1:
                     with c_add2: st.number_input("金額", key=f"pr_{item['id']}", min_value=0, step=100, label_visibility="collapsed")
                     with c_add3: st.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item, f"nm_{item['id']}", f"pr_{item['id']}"))
             else:
-                # 安全建構 HTML (拆解成多行變數，防止字串太長導致 SyntaxError)
-                html_parts = []
-                html_parts.append(f"<div class='trip-card'>")
-                
-                # 天氣標籤
+                # 安全建構 HTML
+                h = []
+                h.append("<div class='trip-card'>")
                 if item['loc']:
                     w_icon, w_temp = get_mock_weather(item['loc'], date_str)
-                    html_parts.append(f"<div class='weather-tag'>{w_icon} {w_temp}</div>")
+                    h.append(f"<div class='weather-tag'>{w_icon} {w_temp}</div>")
                 
-                # 卡片標題與價格
-                html_parts.append("<div class='card-header'><div class='card-title-group'>")
-                html_parts.append(f"<div class='card-title'>{item['title']}</div>")
+                h.append("<div class='card-header'><div class='card-title-group'>")
+                h.append(f"<div class='card-title'>{item['title']}</div>")
                 if item['cost'] > 0:
-                    html_parts.append(f"<div class='card-price'>¥{item['cost']:,}</div>")
-                html_parts.append("</div></div>")
+                    h.append(f"<div class='card-price'>¥{item['cost']:,}</div>")
+                h.append("</div></div>")
                 
-                # 地點
                 if item['loc']:
                     safe_loc = urllib.parse.quote(item['loc'])
-                    html_parts.append(f"<div class='card-loc'>📍 <a href='https://www.google.com/maps/search/?api=1&query={safe_loc}' target='_blank'>{item['loc']}</a></div>")
+                    h.append(f"<div class='card-loc'>📍 <a href='https://www.google.com/maps/search/?api=1&query={safe_loc}' target='_blank'>{item['loc']}</a></div>")
                 
-                # 備註與明細
                 note_text = item['note']
                 exp_html = ""
                 if item['expenses']:
@@ -332,13 +327,13 @@ with tab1:
                         exp_html += f"<div style='display:flex; justify-content:space-between;'><span>• {e['name']}</span><span>¥{e['price']:,}</span></div>"
                 
                 if note_text or exp_html:
-                    html_parts.append(f"<div class='card-note'>{note_text}")
+                    h.append(f"<div class='card-note'>{note_text}")
                     if exp_html:
-                        html_parts.append(f"<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; font-size:0.85rem; color:#555;'>{exp_html}</div>")
-                    html_parts.append("</div>")
+                        h.append(f"<div style='margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; font-size:0.85rem; color:#555;'>{exp_html}</div>")
+                    h.append("</div>")
                 
-                html_parts.append("</div>")
-                st.markdown("".join(html_parts), unsafe_allow_html=True)
+                h.append("</div>")
+                st.markdown("".join(h), unsafe_allow_html=True)
                 
     st.markdown('</div>', unsafe_allow_html=True)
     if current_items:
@@ -356,20 +351,29 @@ with tab2:
     map_items.sort(key=lambda x: x['time'])
     
     if len(map_items) > 0:
-        # 使用陣列串接 HTML，避免長字串錯誤
-        tl_parts = []
-        tl_parts.append('<div class="timeline-container">')
+        # 分段組合 HTML
+        t_html = []
+        t_html.append('<div class="timeline-container">')
         
         for item in map_items:
             icon = get_category_icon(item.get('cat', 'other'))
             loc_text = f"📍 {item['loc']}" if item['loc'] else ""
+            t_html.append(f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div>")
+            t_html.append(f"<div class='timeline-content'><div class='tl-time'>{item['time']}</div>")
+            t_html.append(f"<div class='tl-title'>{item['title']}</div>")
+            t_html.append(f"<div class='tl-loc'>{loc_text}</div></div></div>")
             
-            tl_parts.append(f"<div class='timeline-item'><div class='timeline-icon'>{icon}</div>")
-            tl_parts.append(f"<div class='timeline-content'><div class='tl-time'>{item['time']}</div>")
-            tl_parts.append(f"<div class='tl-title'>{item['title']}</div>")
-            tl_parts.append(f"<div class='tl-loc'>{loc_text}</div></div></div>")
-            
-        tl_parts.append('</div>')
-        st.markdown("".join(tl_parts), unsafe_allow_html=True)
-        
-        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsa
+        t_html.append('</div>')
+        st.markdown("".join(t_html), unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; font-size:0.8rem; color:#999; margin-top:20px;'>* 滑動查看行程順序，圖示代表不同活動類型 *</div>", unsafe_allow_html=True)
+    else:
+        st.info("🌸 本日尚無行程，請去規劃頁面添加！")
+
+# ==========================================
+# 3. 準備清單 & 注意事項
+# ==========================================
+with tab3:
+    st.markdown('<div class="retro-subtitle">CHECKLIST & TIPS</div>', unsafe_allow_html=True)
+    
+    try:
+        fo
