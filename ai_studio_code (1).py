@@ -1,7 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import random
-import graphviz
 import urllib.parse
 
 # -------------------------------------
@@ -40,8 +39,20 @@ def generate_google_map_route(items):
     locations = [urllib.parse.quote(item['loc']) for item in items if item['loc']]
     return base_url + "/".join(locations) if locations else "#"
 
+# 根據分類回傳對應的日式 Emoji
+def get_category_icon(cat):
+    icons = {
+        "trans": "🚃", # 交通
+        "food": "🍱",  # 美食
+        "stay": "♨️",  # 住宿
+        "spot": "⛩️",  # 景點
+        "shop": "🛍️",  # 購物
+        "other": "📍"  # 其他
+    }
+    return icons.get(cat, "📍")
+
 # -------------------------------------
-# 3. CSS 樣式
+# 3. CSS 樣式 (含動態時間軸)
 # -------------------------------------
 st.markdown("""
     <style>
@@ -78,41 +89,27 @@ st.markdown("""
 
     /* Day 按鈕橫向排列 */
     div[role="radiogroup"] {
-        display: flex !important;
-        flex-direction: row !important;
-        overflow-x: auto !important;
-        gap: 10px !important;
-        padding: 5px 2px !important;
-        width: 100% !important;
-        justify-content: flex-start !important;
+        display: flex !important; flex-direction: row !important; overflow-x: auto !important;
+        gap: 10px !important; padding: 5px 2px !important; width: 100% !important; justify-content: flex-start !important;
     }
     div[role="radiogroup"] label > div:first-child { display: none !important; }
-    
     div[role="radiogroup"] label {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E0E0E0 !important;
+        background-color: #FFFFFF !important; border: 1px solid #E0E0E0 !important;
         min-width: 60px !important; width: 60px !important; height: 75px !important;
-        display: flex !important; flex-direction: column !important;
-        align-items: center !important; justify-content: center !important;
-        border-radius: 4px !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05) !important;
-        margin: 0 !important; padding: 0 !important;
-        cursor: pointer !important;
+        display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important;
+        border-radius: 4px !important; box-shadow: 0 2px 5px rgba(0,0,0,0.05) !important;
+        margin: 0 !important; padding: 0 !important; cursor: pointer !important;
     }
     div[role="radiogroup"] label p {
-        font-family: 'Times New Roman', serif !important;
-        text-align: center !important; width: 100% !important;
-        line-height: 1 !important; font-size: 1.8rem !important; 
-        font-weight: 500 !important; color: #666 !important;
-        margin: 0 !important;
+        font-family: 'Times New Roman', serif !important; text-align: center !important; width: 100% !important;
+        line-height: 1 !important; font-size: 1.8rem !important; font-weight: 500 !important; color: #666 !important; margin: 0 !important;
     }
     div[role="radiogroup"] label p::first-line {
         font-size: 0.8rem !important; color: #AAA !important; font-weight: 400 !important; line-height: 1.5 !important;
     }
     div[role="radiogroup"] label[data-checked="true"] {
         background-color: #8E2F2F !important; border: 1px solid #8E2F2F !important;
-        box-shadow: 0 4px 8px rgba(142, 47, 47, 0.3) !important;
-        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(142, 47, 47, 0.3) !important; transform: translateY(-2px);
     }
     div[role="radiogroup"] label[data-checked="true"] p { color: #FFFFFF !important; }
     div[role="radiogroup"] label[data-checked="true"] p::first-line { color: rgba(255, 255, 255, 0.8) !important; }
@@ -120,12 +117,9 @@ st.markdown("""
     /* 卡片樣式 */
     .trip-card {
         background: #FFFFFF; border: 1px solid #EBE6DE; border-left: 6px solid #8E2F2F;
-        padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05);
-        position: relative; 
+        padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(142, 47, 47, 0.05); position: relative; 
     }
-    .card-header {
-        display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; padding-right: 60px;
-    }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; padding-right: 60px; }
     .card-title-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .card-title { font-size: 1.3rem; font-weight: 900; color: #2B2B2B; margin: 0; }
     .card-price { background: #8E2F2F; color: white; padding: 3px 8px; font-size: 0.85rem; border-radius: 4px; font-weight: bold; white-space: nowrap; }
@@ -133,12 +127,99 @@ st.markdown("""
     .card-loc { margin-top: 5px; }
     .card-loc a { color: #8E2F2F; text-decoration: none; border-bottom: 1px solid #8E2F2F; font-weight: bold;}
     .card-note { margin-top: 8px; color: #666; font-size: 0.9rem; font-style: italic; background: #F7F7F7; padding: 5px 10px; border-radius: 4px;}
-    
     .card-time { font-family: 'Noto Serif JP', serif; font-size: 1.8rem; font-weight: 700; color: #2B2B2B; text-align: right; margin-top: 10px;}
+    
     .retro-title { font-size: 2.5rem; color: #8E2F2F; text-align: center; font-weight: 900; letter-spacing: 2px; margin-top: 10px;}
     .retro-subtitle { font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 10px; }
-    .timeline-line { position: absolute; left: 88px; top: 0; bottom: 0; width: 1px; border-left: 2px dotted #8E2F2F; z-index: 0; }
     
+    /* =========================================
+       🎨 動態日式時間軸 CSS
+       ========================================= */
+    .timeline-container {
+        position: relative;
+        max-width: 100%;
+        margin: 20px auto;
+        padding-left: 30px; /* 留空間給左邊的線 */
+    }
+    
+    /* 垂直虛線 */
+    .timeline-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 14px; /* 線的位置 */
+        width: 2px;
+        background-image: linear-gradient(#8E2F2F 40%, rgba(255,255,255,0) 0%);
+        background-position: right;
+        background-size: 2px 12px; /* 虛線間距 */
+        background-repeat: repeat-y;
+    }
+
+    .timeline-item {
+        position: relative;
+        margin-bottom: 25px;
+        animation: fadeInUp 0.6s ease-in-out both; /* 動畫 */
+    }
+    
+    /* 為每個項目增加延遲，製造依序出現的效果 */
+    .timeline-item:nth-child(1) { animation-delay: 0.1s; }
+    .timeline-item:nth-child(2) { animation-delay: 0.2s; }
+    .timeline-item:nth-child(3) { animation-delay: 0.3s; }
+    .timeline-item:nth-child(4) { animation-delay: 0.4s; }
+    .timeline-item:nth-child(5) { animation-delay: 0.5s; }
+    .timeline-item:nth-child(6) { animation-delay: 0.6s; }
+    .timeline-item:nth-child(7) { animation-delay: 0.7s; }
+    .timeline-item:nth-child(8) { animation-delay: 0.8s; }
+
+    /* 圓形圖標 */
+    .timeline-icon {
+        position: absolute;
+        left: -31px; /* 調整到線的中間 */
+        top: 0px;
+        width: 32px;
+        height: 32px;
+        background: #FFFFFF;
+        border: 2px solid #8E2F2F;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 28px;
+        font-size: 16px;
+        z-index: 2;
+        box-shadow: 0 2px 4px rgba(142, 47, 47, 0.2);
+    }
+
+    /* 內容卡片 */
+    .timeline-content {
+        background: #FFFFFF;
+        border: 1px solid #E0E0E0;
+        border-left: 4px solid #8E2F2F;
+        padding: 12px 15px;
+        border-radius: 4px;
+        box-shadow: 0 3px 6px rgba(0,0,0,0.05);
+        transition: transform 0.2s;
+    }
+
+    .timeline-content:hover {
+        transform: scale(1.02); /* 滑鼠懸停放大 */
+        box-shadow: 0 5px 12px rgba(142, 47, 47, 0.15);
+    }
+
+    .tl-time { font-weight: 700; color: #8E2F2F; font-size: 1.1rem; font-family: 'Noto Serif JP', serif; }
+    .tl-title { font-weight: 900; color: #2B2B2B; font-size: 1.05rem; margin-top: 2px; }
+    .tl-loc { font-size: 0.85rem; color: #666; margin-top: 4px; display: flex; align-items: center; gap: 4px;}
+
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translate3d(0, 20px, 0);
+        }
+        to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0);
+        }
+    }
+
     /* 其他 UI */
     div[data-baseweb="input"], div[data-baseweb="base-input"] { border: none !important; border-bottom: 2px solid #8E2F2F !important; background: transparent !important; }
     input { font-weight: bold !important; color: #2B2B2B !important; }
@@ -152,6 +233,7 @@ st.markdown("""
 if "trip_title" not in st.session_state:
     st.session_state.trip_title = "長野・名古屋"
 
+# 更新資料結構：確保每個項目都有 'cat' (分類)
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
         1: [{"id": 101, "time": "11:35", "title": "抵達名古屋", "loc": "中部國際機場", "cost": 0, "cat": "trans", "note": "", "expenses": []}],
@@ -163,7 +245,13 @@ if "trip_data" not in st.session_state:
         ]
     }
 
-# 自動修復舊資料格式
+# 自動修復與補齊 'cat' 欄位
+for day, items in st.session_state.trip_data.items():
+    for item in items:
+        if "cat" not in item:
+            item["cat"] = "other"
+
+# 預設清單
 default_checklist = {
     "必要證件": {"護照 (效期6個月以上)": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False, "信用卡 (JCB/Visa)": False, "海外提款卡": False},
     "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭 (日本雙孔扁插)": False, "耳機": False},
@@ -251,6 +339,13 @@ with tab1:
                     except: t_obj = datetime.strptime("09:00", "%H:%M").time()
                     item['time'] = c1.time_input("時間", value=t_obj, key=f"tm_{item['id']}").strftime("%H:%M")
                     c2.markdown(f"**💰 ¥{item['cost']:,}**")
+                    
+                    # 分類選單 (編輯模式下選擇)
+                    item['cat'] = st.selectbox("分類", ["trans", "food", "stay", "spot", "shop", "other"], 
+                                               index=["trans", "food", "stay", "spot", "shop", "other"].index(item.get('cat', 'other')),
+                                               format_func=lambda x: {"trans":"🚃 交通", "food":"🍱 美食", "stay":"♨️ 住宿", "spot":"⛩️ 景點", "shop":"🛍️ 購物", "other":"📍 其他"}[x],
+                                               key=f"cat_{item['id']}")
+                    
                     item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
                     item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
                     
@@ -271,7 +366,7 @@ with tab1:
                     with c_add2: st.number_input("金額", key=f"pr_{item['id']}", min_value=0, step=100, label_visibility="collapsed")
                     with c_add3: st.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item, f"nm_{item['id']}", f"pr_{item['id']}"))
             else:
-                # 瀏覽模式：移除多行字串，改用單行串接，徹底杜絕縮排問題
+                # 瀏覽模式
                 weather_html = ""
                 if item['loc']:
                     w_icon, w_temp = get_mock_weather(item['loc'], date_str)
@@ -295,7 +390,7 @@ with tab1:
                 if note_content:
                     note_html = f"<div class='card-note'>{note_content}</div>"
 
-                # ⚠️ 關鍵修正：將 HTML 組裝成單一行，不要換行，避免縮排錯誤
+                # HTML 單行串接
                 card_html = f"<div class='trip-card'>{weather_html}<div class='card-header'><div class='card-title-group'><div class='card-title'>{item['title']}</div>{price_html}</div></div>{loc_html}{note_html}</div>"
                 st.markdown(card_html, unsafe_allow_html=True)
                 
@@ -306,54 +401,23 @@ with tab1:
         st.markdown(f"<div style='text-align:center;'><a href='{route_url}' target='_blank' style='background:#8E2F2F; color:white; padding:10px 25px; border-radius:30px; text-decoration:none; font-weight:bold;'>🚗 Google Maps 路線導航</a></div>", unsafe_allow_html=True)
 
 # ==========================================
-# 2. 路線全覽
+# 2. 路線全覽 (全新動態日式風格)
 # ==========================================
 with tab2:
-    st.markdown('<div class="retro-subtitle">ROUTE MAP</div>', unsafe_allow_html=True)
+    st.markdown('<div class="retro-subtitle">ILLUSTRATED ROUTE MAP</div>', unsafe_allow_html=True)
     map_day = st.selectbox("選擇天數", list(range(1, trip_days_count + 1)), format_func=lambda x: f"Day {x}")
     map_items = st.session_state.trip_data[map_day]
     map_items.sort(key=lambda x: x['time'])
     
-    if len(map_items) > 1:
-        dot = graphviz.Digraph()
-        dot.attr(rankdir='TB') 
-        dot.attr('node', shape='box', style='filled', fillcolor='#FDFCF5', color='#8E2F2F', fontname='Noto Serif JP', fontsize='14', height='0.6')
-        dot.attr('edge', color='#8E2F2F', penwidth='1.5')
+    if len(map_items) > 0:
+        # 組合 HTML 結構
+        timeline_html = '<div class="timeline-container">'
         
-        last = None
         for item in map_items:
-            label = f"{item['time']} {item['title']}\n📍{item['loc']}" if item['loc'] else f"{item['time']} {item['title']}"
-            dot.node(str(item['id']), label)
-            if last: dot.edge(last, str(item['id']))
-            last = str(item['id'])
-        
-        st.graphviz_chart(dot, use_container_width=True)
-    else:
-        st.info("行程過少，無法繪製路線。")
-
-# ==========================================
-# 3. 準備清單 & 注意事項
-# ==========================================
-with tab3:
-    st.markdown('<div class="retro-subtitle">CHECKLIST & TIPS</div>', unsafe_allow_html=True)
-    
-    try:
-        for category, items in st.session_state.checklist.items():
-            with st.expander(f"📌 {category}", expanded=False):
-                cols = st.columns(2)
-                for i, (item_name, checked) in enumerate(items.items()):
-                    st.session_state.checklist[category][item_name] = cols[i % 2].checkbox(item_name, value=checked)
-    except:
-        st.error("偵測到資料更新，已自動修復清單格式。")
-        st.session_state.checklist = default_checklist
-        st.rerun()
-
-    st.markdown("### 🇯🇵 旅日注意事項")
-    with st.container(border=True):
-        st.markdown("""
-        *   **🔌 電壓**：日本電壓 100V，插座為雙平腳（與台灣相同），台灣電器通常可直接使用。
-        *   **💰 退稅**：同日同店消費滿 **5,000日圓** (未稅) 即可退稅 (10%)。需出示護照。
-        *   **🚆 交通**：建議使用 **Suica / ICOCA** (西瓜卡)，iPhone 可直接綁定 Apple Pay 儲值。
-        *   **🗑️ 垃圾**：日本街道垃圾桶極少，垃圾需自行帶回飯店或車站丟棄。
-        *   **🆘 緊急電話**：警察 110 / 救護車 119 / 駐日代表處 (03) 3280-7811。
-        """)
+            icon = get_category_icon(item.get('cat', 'other'))
+            loc_text = f"📍 {item['loc']}" if item['loc'] else ""
+            
+            # 單行 HTML 避免縮排問題
+            timeline_html += f"""
+            <div class="timeline-item">
+                <div class="t
