@@ -1,9 +1,12 @@
 import streamlit as st
 from datetime import datetime, timedelta
+import urllib.parse
 import time
+import math
 import pandas as pd
 import random
 import json
+import base64
 
 # --- 嘗試匯入進階套件 (雲端) ---
 try:
@@ -46,16 +49,45 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- AI 針對單一行程的建議 (新增) ---
+def get_gemini_model_name():
+    """自動偵測可用的 Gemini 模型名稱"""
+    default_model = 'models/gemini-1.5-flash'
+    if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
+        return default_model
+    
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        # 列出所有支援 generateContent 的模型
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 優先順序列表
+        priority_list = [
+            'models/gemini-2.0-flash',
+            'models/gemini-2.0-flash-exp',
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-latest',
+            'models/gemini-1.5-pro'
+        ]
+        
+        for model in priority_list:
+            if model in available_models:
+                return model
+                
+    except:
+        pass
+    
+    return default_model
+
+# --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
-    """針對當下行程產生建議"""
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         yield "⚠️ 請先設定 API Key 才能啟用 AI 即時建議功能。"
         return
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        model_name = get_gemini_model_name() # 自動取得正確模型名稱
+        model = genai.GenerativeModel(model_name)
         
         prompt = f"""
         使用者目前正在 {country} 旅遊。
@@ -67,12 +99,10 @@ def get_ai_step_advice_stream(item, country):
         - 交通方式：{item.get('trans_mode', '無')}
         
         請扮演一位貼心的隨身導遊，針對這個「特定的行程」提供一段簡短的建議 (約 100-150 字)。
-        
         內容策略：
-        1. 如果是「機場/海關/交通移動」：請提醒注意事項（如護照、車票、檢查流程）。
-        2. 如果是「景點」：請簡單介紹看點或歷史小故事。
-        3. 如果是「用餐/逛街」：請推薦必吃或必買。
-        
+        1. 機場/交通：提醒注意事項。
+        2. 景點：介紹看點。
+        3. 用餐：推薦必吃。
         請直接輸出內容，語氣輕鬆活潑。
         """
         response = model.generate_content(prompt, stream=True)
@@ -80,17 +110,20 @@ def get_ai_step_advice_stream(item, country):
             if chunk.text:
                 yield chunk.text
     except Exception as e:
-        yield f"AI 連線錯誤: {e}"
+        yield f"AI 連線錯誤 (Model: {model_name}): {e}"
 
-# --- AI 導遊對話 (Tab 6 使用) ---
+# --- AI 導遊對話 ---
 def ask_ai_guide_stream(prompt, context_data):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         yield "系統提示：請先設定 API Key。"
         return
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model_name = get_gemini_model_name()
+        model = genai.GenerativeModel(model_name)
+        
         system_prompt = f"你是一位導遊，這是使用者的行程：{json.dumps(context_data, ensure_ascii=False)}"
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        
         chat = model.start_chat(history=[])
         response = chat.send_message(system_prompt + "\n使用者問：" + prompt, stream=True)
         for chunk in response:
@@ -106,7 +139,10 @@ def analyze_receipt_image(image_file):
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         img = Image.open(image_file)
         prompt = "分析收據，列出商品與金額，排除小計稅金，回傳 JSON Array: [{'name':str, 'price':int}]"
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        
+        model_name = get_gemini_model_name()
+        model = genai.GenerativeModel(model_name)
+        
         response = model.generate_content([prompt, img])
         text = response.text.strip().replace("```json", "").replace("```", "")
         data = json.loads(text)
@@ -231,7 +267,22 @@ if "chat_history" not in st.session_state:
 if "current_step_index" not in st.session_state:
     st.session_state.current_step_index = 0
 if "ai_advice_cache" not in st.session_state:
-    st.session_state.ai_advice_cache = {} # 快取每個步驟的 AI 建議
+    st.session_state.ai_advice_cache = {} 
+
+# --- 關鍵修復：確保 checklist 是字典結構 ---
+default_checklist = {
+    "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
+    "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭": False},
+    "衣物穿搭": {"換洗衣物": False, "睡衣": False, "好走的鞋子": False, "外套": False},
+    "生活用品": {"牙刷牙膏": False, "常備藥": False, "塑膠袋": False, "折疊傘": False}
+}
+
+# 如果 checklist 不存在，或格式錯誤(不是dict)，就重置它
+if "checklist" not in st.session_state or not isinstance(st.session_state.checklist, dict):
+    st.session_state.checklist = default_checklist
+# 進一步檢查內部是否也是 dict
+elif not all(isinstance(v, dict) for v in st.session_state.checklist.values()):
+    st.session_state.checklist = default_checklist
 
 current_theme = THEMES[st.session_state.selected_theme_name]
 
@@ -413,11 +464,10 @@ with tab1:
         # 5. AI 智慧建議區塊
         st.markdown("### ✨ AI 智慧助理")
         
-        # 檢查快取，如果這個行程ID還沒問過AI，就自動問
+        # 檢查快取
         item_id = current_item['id']
         if item_id not in st.session_state.ai_advice_cache:
             with st.spinner("🤖 AI 正在分析此行程並提供建議..."):
-                # 使用 generator 串接
                 response_text = ""
                 placeholder = st.empty()
                 for chunk in get_ai_step_advice_stream(current_item, st.session_state.target_country):
@@ -425,7 +475,6 @@ with tab1:
                     placeholder.markdown(f"<div class='ai-box'>{response_text}</div>", unsafe_allow_html=True)
                 st.session_state.ai_advice_cache[item_id] = response_text
         else:
-            # 顯示快取內容
             st.markdown(f"<div class='ai-box'>{st.session_state.ai_advice_cache[item_id]}</div>", unsafe_allow_html=True)
             if st.button("🔄 重新生成建議"):
                 del st.session_state.ai_advice_cache[item_id]
@@ -453,7 +502,6 @@ with tab1:
                 <span style="font-size:0.8rem">📍 {next_one['loc']}</span>
             </div>
             """, unsafe_allow_html=True)
-
 
 # ==========================================
 # 2. 行程規劃
@@ -592,6 +640,7 @@ with tab3:
         with st.container():
             wish_html = f"""<div class="apple-card" style="padding:15px; margin-bottom:10px; border-left:4px solid {c_primary};"><div style="font-weight:bold; font-size:1.1rem;">{wish['title']}</div><div style="font-size:0.9rem; color:{c_sub};">📍 {wish['loc']}｜📝 {wish['note']}</div></div>"""
             st.markdown(wish_html, unsafe_allow_html=True)
+            
             c1, c2, c3 = st.columns([2, 1, 1])
             target_day = c1.selectbox("移至", list(range(1, st.session_state.trip_days_count + 1)), key=f"wd_{wish['id']}")
             if c2.button("排程", key=f"wm_{wish['id']}"):
@@ -614,11 +663,11 @@ with tab4:
     c_list_head, c_list_edit = st.columns([3, 1])
     c_list_head.subheader("🎒 準備清單")
     edit_list_mode = c_list_edit.toggle("編輯")
-    for category, items in st.session_state.checklist.items():
+    for category, items_dict in st.session_state.checklist.items():
         st.markdown(f"**{category}**")
         cols = st.columns(2)
         keys_del = []
-        for i, (item, checked) in enumerate(items.items()):
+        for i, (item, checked) in enumerate(items_dict.items()):
             col = cols[i % 2]
             if edit_list_mode:
                 c1, c2 = col.columns([4,1])
@@ -724,16 +773,16 @@ with tab6:
     
     st.subheader("🆘 緊急")
     target_country_sos = st.session_state.target_country
-    if target_country_sos in SURVIVAL_PHRASES: 
-        sos_map = {
-            "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
-            "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
-            "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
-        }
-        if target_country_sos in sos_map:
-            s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
-            s_txt = sos_map[target_country_sos][s_type]
-            st.markdown(f"<div style='background:#D32F2F; color:white; padding:20px; border-radius:10px; text-align:center; font-size:1.5rem;'>{s_txt}</div>", unsafe_allow_html=True)
+    
+    sos_map = {
+        "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
+        "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
+        "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
+    }
+    if target_country_sos in sos_map:
+        s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
+        s_txt = sos_map[target_country_sos][s_type]
+        st.markdown(f"<div style='background:#D32F2F; color:white; padding:20px; border-radius:10px; text-align:center; font-size:1.5rem;'>{s_txt}</div>", unsafe_allow_html=True)
     
     st.divider()
     
