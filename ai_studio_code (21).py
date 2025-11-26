@@ -57,11 +57,11 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 收據分析 (Gemini 1.5 Flash) ---
+# --- 收據分析 (Gemini 智慧容錯版) ---
 def analyze_receipt_image(image_file):
-    """使用 Google Gemini 1.5 Flash 真實分析收據"""
+    """使用 Google Gemini 分析收據，包含自動模型偵測與除錯功能"""
     
-    # 1. 檢查是否有 API Key 和套件
+    # 1. 基本檢查
     if not GEMINI_AVAILABLE:
         return {"item": "套件未安裝 (模擬)", "price": 1000}
     
@@ -72,13 +72,10 @@ def analyze_receipt_image(image_file):
         # 2. 設定 API
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 3. 載入模型 (使用 Flash 版本，速度快且免費額度高)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # 4. 處理圖片
+        # 3. 處理圖片
         img = Image.open(image_file)
         
-        # 5. 發送請求
+        # 4. 定義提示詞
         prompt = """
         你是一個旅遊記帳助手。請分析這張收據圖片。
         請提取以下資訊：
@@ -89,12 +86,53 @@ def analyze_receipt_image(image_file):
         格式範例： {"item": "一蘭拉麵", "price": 1280}
         如果無法辨識，price 請回傳 0。
         """
+
+        # 5. 【關鍵修改】自動尋找可用模型
+        # 先嘗試取得所有支援 'generateContent' 的模型列表
+        available_models = []
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+        except Exception as e:
+            st.error(f"無法列出模型清單: {e}")
+
+        # 定義我們想嘗試的模型順序 (優先用 Flash，失敗則用 Pro 或 Vision)
+        # 注意：模型名稱通常需要包含 'models/' 前綴
+        priority_models = [
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-001',
+            'models/gemini-1.5-flash-latest',
+            'models/gemini-1.5-pro',
+            'models/gemini-pro-vision'
+        ]
+
+        # 挑選一個存在的模型
+        target_model_name = None
+        for candidate in priority_models:
+            if candidate in available_models:
+                target_model_name = candidate
+                break
         
-        response = model.generate_content([prompt, img])
+        # 如果清單對不上，就強行試試看第一個
+        if not target_model_name:
+            target_model_name = 'gemini-1.5-flash'
+
+        # 6. 開始生成
+        try:
+            model = genai.GenerativeModel(target_model_name)
+            response = model.generate_content([prompt, img])
+        except Exception as e:
+            # 如果失敗，顯示詳細錯誤並列出可用模型幫助除錯
+            st.error(f"模型 {target_model_name} 調用失敗。")
+            with st.expander("查看除錯資訊 (API Key 權限)"):
+                st.write(f"錯誤訊息: {e}")
+                st.write("您的 API Key 目前可用的模型清單：")
+                st.write(available_models)
+            return {"item": "API 錯誤", "price": 0}
         
-        # 6. 解析回傳結果
+        # 7. 解析回傳結果
         text = response.text.strip()
-        # 移除可能存在的 markdown 標記 (```json ... ```)
         if text.startswith("```"):
             text = text.replace("```json", "").replace("```", "")
         
@@ -102,10 +140,8 @@ def analyze_receipt_image(image_file):
         return data
 
     except Exception as e:
-        st.error(f"AI 分析失敗: {e}")
-        # 發生錯誤時回傳預設值，避免程式崩潰
+        st.error(f"系統錯誤: {e}")
         return {"item": "分析失敗", "price": 0}
-
 # --- 地理編碼 ---
 @st.cache_data
 def get_lat_lon(location_name):
