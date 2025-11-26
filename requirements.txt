@@ -10,3 +10,5 @@ pillow
 streamlit-folium
 folium
 geopy
+google-generativeai
+Pillow
