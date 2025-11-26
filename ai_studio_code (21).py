@@ -97,11 +97,11 @@ def analyze_receipt_image(image_file):
         except Exception as e:
             st.error(f"無法列出模型清單: {e}")
 
-        # 定義我們想嘗試的模型順序 (優先用 Flash，失敗則用 Pro 或 Vision)
-        # 注意：模型名稱通常需要包含 'models/' 前綴
+     # 定義我們想嘗試的模型順序 (根據您的截圖調整)
         priority_models = [
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-001',
+            'models/gemini-2.0-flash',          # 首選：最新、最快
+            'models/gemini-2.0-flash-exp',      # 備選：實驗版
+            'models/gemini-1.5-flash',          # 備選：穩定版
             'models/gemini-1.5-flash-latest',
             'models/gemini-1.5-pro',
             'models/gemini-pro-vision'
