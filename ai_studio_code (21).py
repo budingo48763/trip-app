@@ -8,13 +8,22 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 (雲端) ---
+# --- 嘗試匯入進階套件 ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     CLOUD_AVAILABLE = True
 except ImportError:
     CLOUD_AVAILABLE = False
+
+try:
+    import folium
+    from folium import plugins
+    from streamlit_folium import st_folium
+    from geopy.geocoders import Nominatim
+    MAP_AVAILABLE = True
+except ImportError:
+    MAP_AVAILABLE = False
 
 # --- Google Gemini 套件 ---
 try:
@@ -49,36 +58,60 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
+# --- 通用：自動選擇最佳 Gemini 模型 ---
+def get_best_gemini_model():
+    """自動偵測並回傳可用的最佳模型名稱"""
+    default_model = 'models/gemini-1.5-flash'
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # 優先順序
+        priority = [
+            'models/gemini-2.0-flash',
+            'models/gemini-2.0-flash-exp',
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-latest',
+            'models/gemini-1.5-pro'
+        ]
+        for p in priority:
+            if p in available_models:
+                return p
+    except:
+        pass
+    return default_model
+
 # --- AI 導遊對話 ---
 def ask_ai_guide_stream(prompt, context_data):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
-        yield "系統提示：請先設定 API Key。"
+        yield "系統提示：請先安裝 google-generativeai 套件並設定 API Key。"
         return
+
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        target_model = get_best_gemini_model()
+        model = genai.GenerativeModel(target_model)
         
         system_prompt = f"""
         你是一位專業導遊。
-        【使用者行程資料】：{json.dumps(context_data, ensure_ascii=False)}
+        【使用者行程】：{json.dumps(context_data, ensure_ascii=False)}
         """
         
-        # 載入歷史紀錄
-        history = []
+        gemini_history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
-                if msg["role"] == "assistant" and "AI" in msg["content"]: continue
+                if msg["role"] == "assistant" and "你好" in msg["content"]: continue
                 role = "user" if msg["role"] == "user" else "model"
-                history.append({"role": role, "parts": [msg["content"]]})
+                gemini_history.append({"role": role, "parts": [msg["content"]]})
         
-        chat = model.start_chat(history=history)
+        chat = model.start_chat(history=gemini_history)
         response = chat.send_message(system_prompt + "\n使用者：" + prompt, stream=True)
+        
         for chunk in response:
             if chunk.text: yield chunk.text
-    except Exception as e:
-        yield f"錯誤：{e}"
 
-# --- AI 針對單一行程的建議 (Live 分頁用) ---
+    except Exception as e:
+        yield f"連線錯誤 ({target_model}): {e}"
+
+# --- AI 針對單一行程的建議 (修復 404 錯誤) ---
 def get_ai_step_advice_stream(item, country):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         yield "⚠️ 請設定 API Key 以啟用 AI 建議。"
@@ -86,44 +119,57 @@ def get_ai_step_advice_stream(item, country):
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        target_model = get_best_gemini_model() # 使用自動偵測
+        model = genai.GenerativeModel(target_model)
         
         prompt = f"""
         使用者正在 {country} 旅遊。
-        當下行程：
-        - 時間：{item['time']}
-        - 名稱：{item['title']}
-        - 地點：{item['loc']}
-        - 備註：{item['note']}
-        - 交通：{item.get('trans_mode', '無')}
+        當下行程：{item['title']} (地點: {item['loc']})
+        備註：{item['note']}
         
         請扮演貼心導遊，提供約 100 字的簡短建議。
-        情境：
-        1. 機場/交通：提醒護照、票券、檢查流程。
-        2. 景點：介紹亮點或歷史。
-        3. 用餐：推薦必吃。
+        若在機場/車站，提醒注意事項；若在景點，介紹看點；若在餐廳，推薦必吃。
         """
         response = model.generate_content(prompt, stream=True)
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        yield f"連線錯誤: {e}"
+        yield f"AI 連線錯誤: {e}"
 
 # --- 收據分析 ---
 def analyze_receipt_image(image_file):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         return [{"name": "模擬商品", "price": 100}]
+
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        target_model = get_best_gemini_model()
+        model = genai.GenerativeModel(target_model)
+        
         img = Image.open(image_file)
         prompt = "分析收據，列出商品與金額，排除小計稅金，回傳 JSON Array: [{'name':str, 'price':int}]"
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        
         response = model.generate_content([prompt, img])
-        text = response.text.strip().replace("```json", "").replace("```", "")
+        text = response.text.strip()
+        if text.startswith("```"): text = text.replace("```json", "").replace("```", "")
+        
         data = json.loads(text)
-        return data if isinstance(data, list) else [data]
-    except:
-        return [{"name": "分析失敗", "price": 0}]
+        if isinstance(data, dict): return [data]
+        return data
+
+    except Exception as e:
+        return [{"name": f"分析失敗: {e}", "price": 0}]
+
+# --- 地理編碼 ---
+@st.cache_data
+def get_lat_lon(location_name):
+    if not MAP_AVAILABLE: return None
+    try:
+        geolocator = Nominatim(user_agent="trip_planner_v19_final")
+        location = geolocator.geocode(location_name)
+        if location: return (location.latitude, location.longitude)
+    except: return None
+    return None
 
 # --- 雲端連線 ---
 def get_cloud_connection():
@@ -210,6 +256,13 @@ def generate_google_nav_link(origin, dest, mode="transit"):
     base = "https://www.google.com/maps/dir/?api=1"
     return f"{base}&origin={urllib.parse.quote(origin)}&destination={urllib.parse.quote(dest)}&travelmode={mode}"
 
+def generate_google_map_route(items):
+    valid_locs = [item['loc'] for item in items if item.get('loc') and item['loc'].strip()]
+    if len(valid_locs) < 1: return "#"
+    base_url = "https://www.google.com/maps/dir/"
+    encoded_locs = [urllib.parse.quote(loc) for loc in valid_locs]
+    return base_url + "/".join(encoded_locs)
+
 def process_excel_upload(uploaded_file):
     try:
         df = pd.read_excel(uploaded_file)
@@ -248,13 +301,11 @@ if "shopping_list" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
 
-# 觸發器 & Live 變數
 if "trigger_ai" not in st.session_state: st.session_state.trigger_ai = False
 if "trigger_query" not in st.session_state: st.session_state.trigger_query = ""
 if "current_step_index" not in st.session_state: st.session_state.current_step_index = 0
 if "ai_advice_cache" not in st.session_state: st.session_state.ai_advice_cache = {}
 
-# Checklist 初始化
 default_checklist = {
     "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
     "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭": False},
@@ -358,7 +409,6 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 }}
 .info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
 
-/* UI Tweaks */
 div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; padding: 4px !important; border-radius: 12px !important; overflow-x: auto; flex-wrap: nowrap; }}
 div[data-testid="stRadio"] label {{ background-color: transparent !important; border: none !important; flex: 1 !important; text-align: center !important; border-radius: 9px !important; }}
 div[data-testid="stRadio"] label[data-checked="true"] {{ background-color: {c_card} !important; color: {c_text} !important; font-weight: bold !important; }}
@@ -393,14 +443,14 @@ with st.expander("⚙️ 設定"):
 for d in range(1, st.session_state.trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
-# Tabs (🚀 進行中 取代 地圖)
+# Tabs (🚀 進行中 置頂)
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🚀 進行中", "📅 行程", "✨ 願望", "🎒 清單", "ℹ️ 資訊", "🧰 工具", "🤖 導遊"])
 
 # ==========================================
 # 1. 🚀 進行中 (Live Activity Guide)
 # ==========================================
 with tab1:
-    # 整理所有行程
+    # 1. 整理所有行程為順序列表
     all_steps = []
     for d in sorted(st.session_state.trip_data.keys()):
         day_items = sorted(st.session_state.trip_data[d], key=lambda x: x['time'])
@@ -420,6 +470,13 @@ with tab1:
         st.info("📭 請先到「📅 行程」分頁新增行程。")
     else:
         curr = all_steps[st.session_state.current_step_index]
+        real_item = None
+        
+        # 尋找真實的 item 參照 (以便更新)
+        for item in st.session_state.trip_data[curr['day_num']]:
+            if item['id'] == curr['id']:
+                real_item = item
+                break
         
         # 進度條
         prog = (st.session_state.current_step_index) / len(all_steps)
@@ -441,6 +498,56 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
         
+        # --- 💰 快速記帳 (移動到這裡) ---
+        with st.expander("💰 快速記帳 (點擊展開)", expanded=False):
+            if real_item:
+                input_method = st.radio("方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"live_in_{curr['id']}")
+                uploaded_receipt = None
+                
+                if input_method == "📸 拍照":
+                    if st.toggle("🔴 啟動相機", key=f"live_cam_tog_{curr['id']}"):
+                        uploaded_receipt = st.camera_input("拍照", key=f"live_cam_{curr['id']}")
+                else:
+                    uploaded_receipt = st.file_uploader("上傳", type=["jpg","png"], key=f"live_upl_{curr['id']}")
+                
+                scan_flag = f"live_scan_{curr['id']}"
+                
+                if uploaded_receipt and not st.session_state.get(scan_flag, False):
+                    with st.spinner("分析中..."):
+                        results = analyze_receipt_image(uploaded_receipt)
+                    if isinstance(results, list):
+                        cnt = 0
+                        for res in results:
+                            if res.get('price', 0) > 0:
+                                real_item['expenses'].append(res)
+                                cnt += 1
+                        if cnt > 0:
+                            real_item['cost'] = sum(x['price'] for x in real_item['expenses'])
+                            st.success(f"已加入 {cnt} 筆")
+                            st.session_state[scan_flag] = True
+                            time.sleep(1)
+                            st.rerun()
+                
+                if not uploaded_receipt and st.session_state.get(scan_flag, False):
+                    st.session_state[scan_flag] = False
+
+                # 手動輸入
+                cx1, cx2, cx3 = st.columns([2, 1, 1])
+                new_n = cx1.text_input("項目", key=f"live_n_{curr['id']}", label_visibility="collapsed")
+                new_p = cx2.number_input("金額", min_value=0, key=f"live_p_{curr['id']}", label_visibility="collapsed")
+                if cx3.button("➕", key=f"live_add_{curr['id']}"):
+                    if new_n and new_p > 0:
+                        real_item['expenses'].append({"name": new_n, "price": new_p})
+                        real_item['cost'] = sum(x['price'] for x in real_item['expenses'])
+                        st.rerun()
+
+                # 顯示明細
+                if real_item.get('expenses'):
+                    st.divider()
+                    st.caption(f"已記錄花費 (總計 ¥{real_item['cost']:,})")
+                    for ex in real_item['expenses']:
+                        st.text(f"{ex['name']} : ¥{ex['price']:,}")
+
         # AI 建議
         st.markdown("### ✨ AI 即時建議")
         item_id = curr['id']
@@ -483,6 +590,7 @@ with tab2:
     current_items = st.session_state.trip_data[selected_day_num]
     current_items.sort(key=lambda x: x['time'])
     
+    # 預算儀表板
     all_cost = sum([item.get('cost', 0) for item in current_items])
     all_actual = sum([sum(x['price'] for x in item.get('expenses', [])) for item in current_items])
     
@@ -526,7 +634,7 @@ with tab2:
                     st.markdown(f"- {exp['name']}: ¥{exp['price']:,}")
 
         if is_edit_mode:
-            with st.expander("✏️ 編輯與記帳", expanded=False):
+            with st.expander("✏️ 編輯行程", expanded=False):
                 c1, c2 = st.columns([2, 1])
                 item['title'] = c1.text_input("名稱", item['title'], key=f"t_{item['id']}")
                 item['time'] = c2.time_input("時間", datetime.strptime(item['time'], "%H:%M").time(), key=f"tm_{item['id']}").strftime("%H:%M")
@@ -534,47 +642,6 @@ with tab2:
                 item['cost'] = st.number_input("預算 (¥)", value=item['cost'], step=100, key=f"c_{item['id']}")
                 item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
                 
-                st.markdown("---")
-                st.caption("💰 記帳 / 掃描")
-                input_method = st.radio("方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"in_method_{item['id']}")
-                uploaded_receipt = None
-                if input_method == "📸 拍照":
-                    if st.toggle("🔴 啟動相機", key=f"toggle_cam_{item['id']}"):
-                        uploaded_receipt = st.camera_input("拍照", key=f"cam_{item['id']}", label_visibility="collapsed")
-                else:
-                    uploaded_receipt = st.file_uploader("上傳", type=["jpg","png"], key=f"upl_{item['id']}", label_visibility="collapsed")
-
-                scan_flag = f"scan_done_{item['id']}"
-                if uploaded_receipt and not st.session_state.get(scan_flag, False):
-                    with st.spinner("分析中..."):
-                        results = analyze_receipt_image(uploaded_receipt)
-                    if isinstance(results, list):
-                        cnt = 0
-                        for res in results:
-                            if res.get('price', 0) > 0:
-                                item['expenses'].append(res)
-                                cnt += 1
-                        if cnt > 0:
-                            st.success(f"已加入 {cnt} 筆")
-                            st.session_state[scan_flag] = True
-                            time.sleep(1)
-                            st.rerun()
-                if not uploaded_receipt and st.session_state.get(scan_flag, False):
-                    st.session_state[scan_flag] = False
-
-                cx1, cx2, cx3 = st.columns([2, 1, 1])
-                cx1.text_input("項目", key=f"new_exp_n_{item['id']}", label_visibility="collapsed")
-                cx2.number_input("金額", min_value=0, key=f"new_exp_p_{item['id']}", label_visibility="collapsed")
-                cx3.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item['id'], selected_day_num))
-
-                if item.get('expenses'):
-                    for i_ex, ex in enumerate(item['expenses']):
-                        c_d1, c_d2 = st.columns([3,1])
-                        c_d1.text(f"{ex['name']} ¥{ex['price']}")
-                        if c_d2.button("刪", key=f"del_exp_{item['id']}_{i_ex}"):
-                            item['expenses'].pop(i_ex)
-                            st.rerun()
-                            
                 if st.button("🗑️ 刪除行程", key=f"del_{item['id']}"):
                     st.session_state.trip_data[selected_day_num].pop(index)
                     st.rerun()
@@ -741,28 +808,24 @@ with tab6:
     st.divider()
     
     st.subheader("🆘 緊急")
-    sos_country_names = ["日本", "韓國", "泰國"]
-    target_country_sos = st.session_state.target_country if st.session_state.target_country in sos_country_names else "日本"
-
+    target_country_sos = st.session_state.target_country
     sos_map = {
         "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
         "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
         "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
     }
-    s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
-    s_txt = sos_map[target_country_sos][s_type]
-    st.markdown(f"<div style='background:#D32F2F; color:white; padding:20px; border-radius:10px; text-align:center; font-size:1.5rem;'>{s_txt}</div>", unsafe_allow_html=True)
+    if target_country_sos in sos_map:
+        s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
+        s_txt = sos_map[target_country_sos][s_type]
+        st.markdown(f"<div style='background:#D32F2F; color:white; padding:20px; border-radius:10px; text-align:center; font-size:1.5rem;'>{s_txt}</div>", unsafe_allow_html=True)
     
     st.divider()
     
     st.subheader("🗣️ 會話")
-    surv_phrases = {
-        "日本": [("你好", "こんにちは"), ("謝謝", "ありがとう"), ("廁所", "トイレ")],
-        "韓國": [("你好", "안녕하세요"), ("謝謝", "감사합니다"), ("廁所", "화장실")],
-        "泰國": [("你好", "Sawasdee"), ("謝謝", "Khop khun"), ("廁所", "Hong nam")]
-    }
-    if target_country_sos in surv_phrases:
-        for p in surv_phrases[target_country_sos]:
+    if target_country_sos in SURVIVAL_PHRASES:
+        phrases = SURVIVAL_PHRASES[target_country_sos]
+        cat = st.selectbox("情境", list(phrases.keys()))
+        for p in phrases[cat]:
             st.markdown(f"<div class='apple-card' style='padding:10px; margin-bottom:5px;'>{p[0]}<br><b>{p[1]}</b></div>", unsafe_allow_html=True)
 
 # ==========================================
