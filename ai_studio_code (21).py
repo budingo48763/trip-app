@@ -8,22 +8,13 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 ---
+# --- 嘗試匯入進階套件 (雲端) ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     CLOUD_AVAILABLE = True
 except ImportError:
     CLOUD_AVAILABLE = False
-
-try:
-    import folium
-    from folium import plugins
-    from streamlit_folium import st_folium
-    from geopy.geocoders import Nominatim
-    MAP_AVAILABLE = True
-except ImportError:
-    MAP_AVAILABLE = False
 
 # --- Google Gemini 套件 ---
 try:
@@ -58,60 +49,36 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 通用：自動選擇最佳 Gemini 模型 ---
-def get_best_gemini_model():
-    """自動偵測並回傳可用的最佳模型名稱"""
-    default_model = 'models/gemini-1.5-flash'
-    try:
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # 優先順序
-        priority = [
-            'models/gemini-2.0-flash',
-            'models/gemini-2.0-flash-exp',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-pro'
-        ]
-        for p in priority:
-            if p in available_models:
-                return p
-    except:
-        pass
-    return default_model
-
 # --- AI 導遊對話 ---
 def ask_ai_guide_stream(prompt, context_data):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
-        yield "系統提示：請先安裝 google-generativeai 套件並設定 API Key。"
+        yield "系統提示：請先設定 API Key。"
         return
-
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        target_model = get_best_gemini_model()
-        model = genai.GenerativeModel(target_model)
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         
         system_prompt = f"""
         你是一位專業導遊。
-        【使用者行程】：{json.dumps(context_data, ensure_ascii=False)}
+        【使用者行程資料】：{json.dumps(context_data, ensure_ascii=False)}
         """
         
-        gemini_history = []
+        # 載入歷史紀錄
+        history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
-                if msg["role"] == "assistant" and "你好" in msg["content"]: continue
+                if msg["role"] == "assistant" and "AI" in msg["content"]: continue
                 role = "user" if msg["role"] == "user" else "model"
-                gemini_history.append({"role": role, "parts": [msg["content"]]})
+                history.append({"role": role, "parts": [msg["content"]]})
         
-        chat = model.start_chat(history=gemini_history)
+        chat = model.start_chat(history=history)
         response = chat.send_message(system_prompt + "\n使用者：" + prompt, stream=True)
-        
         for chunk in response:
             if chunk.text: yield chunk.text
-
     except Exception as e:
-        yield f"連線錯誤 ({target_model}): {e}"
+        yield f"錯誤：{e}"
 
-# --- AI 針對單一行程的建議 (修復 404 錯誤) ---
+# --- AI 針對單一行程的建議 (Live 分頁用) ---
 def get_ai_step_advice_stream(item, country):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         yield "⚠️ 請設定 API Key 以啟用 AI 建議。"
@@ -119,57 +86,44 @@ def get_ai_step_advice_stream(item, country):
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        target_model = get_best_gemini_model() # 使用自動偵測
-        model = genai.GenerativeModel(target_model)
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         
         prompt = f"""
         使用者正在 {country} 旅遊。
-        當下行程：{item['title']} (地點: {item['loc']})
-        備註：{item['note']}
+        當下行程：
+        - 時間：{item['time']}
+        - 名稱：{item['title']}
+        - 地點：{item['loc']}
+        - 備註：{item['note']}
+        - 交通：{item.get('trans_mode', '無')}
         
         請扮演貼心導遊，提供約 100 字的簡短建議。
-        若在機場/車站，提醒注意事項；若在景點，介紹看點；若在餐廳，推薦必吃。
+        情境：
+        1. 機場/交通：提醒護照、票券、檢查流程。
+        2. 景點：介紹亮點或歷史。
+        3. 用餐：推薦必吃。
         """
         response = model.generate_content(prompt, stream=True)
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        yield f"AI 連線錯誤: {e}"
+        yield f"連線錯誤: {e}"
 
 # --- 收據分析 ---
 def analyze_receipt_image(image_file):
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         return [{"name": "模擬商品", "price": 100}]
-
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        target_model = get_best_gemini_model()
-        model = genai.GenerativeModel(target_model)
-        
         img = Image.open(image_file)
         prompt = "分析收據，列出商品與金額，排除小計稅金，回傳 JSON Array: [{'name':str, 'price':int}]"
-        
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         response = model.generate_content([prompt, img])
-        text = response.text.strip()
-        if text.startswith("```"): text = text.replace("```json", "").replace("```", "")
-        
+        text = response.text.strip().replace("```json", "").replace("```", "")
         data = json.loads(text)
-        if isinstance(data, dict): return [data]
-        return data
-
-    except Exception as e:
-        return [{"name": f"分析失敗: {e}", "price": 0}]
-
-# --- 地理編碼 ---
-@st.cache_data
-def get_lat_lon(location_name):
-    if not MAP_AVAILABLE: return None
-    try:
-        geolocator = Nominatim(user_agent="trip_planner_v19_final")
-        location = geolocator.geocode(location_name)
-        if location: return (location.latitude, location.longitude)
-    except: return None
-    return None
+        return data if isinstance(data, list) else [data]
+    except:
+        return [{"name": "分析失敗", "price": 0}]
 
 # --- 雲端連線 ---
 def get_cloud_connection():
@@ -251,18 +205,6 @@ def get_single_map_link(location):
     if location.startswith("http"): return location
     return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(location)}"
 
-def generate_google_nav_link(origin, dest, mode="transit"):
-    if not origin or not dest: return "#"
-    base = "https://www.google.com/maps/dir/?api=1"
-    return f"{base}&origin={urllib.parse.quote(origin)}&destination={urllib.parse.quote(dest)}&travelmode={mode}"
-
-def generate_google_map_route(items):
-    valid_locs = [item['loc'] for item in items if item.get('loc') and item['loc'].strip()]
-    if len(valid_locs) < 1: return "#"
-    base_url = "https://www.google.com/maps/dir/"
-    encoded_locs = [urllib.parse.quote(loc) for loc in valid_locs]
-    return base_url + "/".join(encoded_locs)
-
 def process_excel_upload(uploaded_file):
     try:
         df = pd.read_excel(uploaded_file)
@@ -301,17 +243,20 @@ if "shopping_list" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
 
-if "trigger_ai" not in st.session_state: st.session_state.trigger_ai = False
-if "trigger_query" not in st.session_state: st.session_state.trigger_query = ""
-if "current_step_index" not in st.session_state: st.session_state.current_step_index = 0
-if "ai_advice_cache" not in st.session_state: st.session_state.ai_advice_cache = {}
+# Live 進度追蹤專用變數
+if "current_step_index" not in st.session_state:
+    st.session_state.current_step_index = 0
+if "ai_advice_cache" not in st.session_state:
+    st.session_state.ai_advice_cache = {} 
 
+# --- 關鍵修復：確保 checklist 是字典結構 ---
 default_checklist = {
     "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
     "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭": False},
     "衣物穿搭": {"換洗衣物": False, "睡衣": False, "好走的鞋子": False, "外套": False},
     "生活用品": {"牙刷牙膏": False, "常備藥": False, "塑膠袋": False, "折疊傘": False}
 }
+
 if "checklist" not in st.session_state or not isinstance(st.session_state.checklist, dict):
     st.session_state.checklist = default_checklist
 elif not all(isinstance(v, dict) for v in st.session_state.checklist.values()):
@@ -348,6 +293,31 @@ if "hotel_info" not in st.session_state:
     ]
 
 TRANSPORT_OPTIONS = ["🚆 電車", "🚌 巴士", "🚶 步行", "🚕 計程車", "🚗 自駕", "🚢 船", "✈️ 飛機"]
+
+# 🌍 旅遊生存會話庫
+SURVIVAL_PHRASES = {
+    "日本": {
+        "招呼": [("你好", "こんにちは (Konnichiwa)"), ("謝謝", "ありがとう (Arigatou)"), ("不好意思", "すみません (Sumimasen)")],
+        "點餐": [("請給我這個", "これをください (Kore wo kudasai)"), ("買單", "お会計お願いします (Okaikei onegaishimasu)"), ("多少錢？", "いくらですか (Ikura desuka?)")],
+        "交通": [("...在哪裡？", "…はどこですか？ (... wa doko desuka?)"), ("車站", "駅 (Eki)"), ("廁所", "トイレ (Toire)")],
+        "購物": [("可以試穿嗎？", "試着してもいいですか (Shichaku shitemo ii desuka)"), ("有免稅嗎？", "免税できますか (Menzei dekimasuka)")],
+        "緊急": [("救命", "助けて (Tasukete)"), ("我身體不舒服", "具合が悪いです (Guai ga warui desu)"), ("我不見了", "迷子になりました (Maigo ni narimashita)")]
+    },
+    "韓國": {
+        "招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다"), ("不好意思", "저기요")],
+        "點餐": [("請給我這個", "이거 주세요"), ("買單", "계산해 주세요"), ("好", "네")],
+        "交通": [("...在哪裡？", "... 어디에요?"), ("車站", "역"), ("洗手間", "화장실")],
+        "購物": [("多少錢？", "얼마예요?"), ("可以打折嗎？", "깎아 주세요")],
+        "緊急": [("救命", "도와주세요"), ("痛", "아파요"), ("警察", "경찰")]
+    },
+    "泰國": {
+        "招呼": [("你好", "Sawasdee khrup/kha"), ("謝謝", "Khop khun khrup/kha")],
+        "點餐": [("我要這個", "Ao an nee"), ("多少錢", "Tao rai?"), ("不辣", "Mai pet")],
+        "交通": [("去...", "Bai ..."), ("廁所", "Hong nam"), ("機場", "Sanam bin")],
+        "購物": [("太貴了", "Paeng mak"), ("可以便宜點嗎", "Lot noi dai mai?")],
+        "緊急": [("救命", "Chuay duay"), ("醫生", "Mor"), ("去醫院", "Bai rong paya ban")]
+    }
+}
 
 # -------------------------------------
 # 4. CSS 樣式
@@ -409,6 +379,7 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 }}
 .info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
 
+/* UI Tweaks */
 div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; padding: 4px !important; border-radius: 12px !important; overflow-x: auto; flex-wrap: nowrap; }}
 div[data-testid="stRadio"] label {{ background-color: transparent !important; border: none !important; flex: 1 !important; text-align: center !important; border-radius: 9px !important; }}
 div[data-testid="stRadio"] label[data-checked="true"] {{ background-color: {c_card} !important; color: {c_text} !important; font-weight: bold !important; }}
@@ -590,7 +561,6 @@ with tab2:
     current_items = st.session_state.trip_data[selected_day_num]
     current_items.sort(key=lambda x: x['time'])
     
-    # 預算儀表板
     all_cost = sum([item.get('cost', 0) for item in current_items])
     all_actual = sum([sum(x['price'] for x in item.get('expenses', [])) for item in current_items])
     
@@ -634,7 +604,7 @@ with tab2:
                     st.markdown(f"- {exp['name']}: ¥{exp['price']:,}")
 
         if is_edit_mode:
-            with st.expander("✏️ 編輯行程", expanded=False):
+            with st.expander("✏️ 編輯與記帳", expanded=False):
                 c1, c2 = st.columns([2, 1])
                 item['title'] = c1.text_input("名稱", item['title'], key=f"t_{item['id']}")
                 item['time'] = c2.time_input("時間", datetime.strptime(item['time'], "%H:%M").time(), key=f"tm_{item['id']}").strftime("%H:%M")
@@ -808,6 +778,7 @@ with tab6:
     st.divider()
     
     st.subheader("🆘 緊急")
+    # 修正變數作用域
     target_country_sos = st.session_state.target_country
     sos_map = {
         "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
