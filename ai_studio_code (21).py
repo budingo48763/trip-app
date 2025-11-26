@@ -8,7 +8,7 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 ---
+# --- 嘗試匯入進階套件 (雲端 & 地圖) ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -18,6 +18,7 @@ except ImportError:
 
 try:
     import folium
+    from folium import plugins  # <--- 關鍵修正：補上這行
     from streamlit_folium import st_folium
     from geopy.geocoders import Nominatim
     MAP_AVAILABLE = True
@@ -57,44 +58,31 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- AI 導遊對話 (新增功能) ---
+# --- AI 導遊對話 ---
 def ask_ai_guide(prompt, context_data):
-    """發送對話給 Gemini，並附帶目前的行程資訊作為背景知識"""
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         return "請先設定 API Key 並安裝 google-generativeai 套件，才能啟用 AI 導遊功能喔！"
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # 建構系統提示詞 (讓 AI 扮演導遊)
         system_prompt = f"""
         你是一位專業、幽默且貼心的私人旅遊導遊。
-        
         【你的任務】：
         1. 根據使用者的問題，提供景點介紹、美食推薦、交通建議或行程規劃。
         2. 回答要簡潔有力，重點清晰，適合手機閱讀。
-        3. 如果使用者問美食，請推薦具體的店名（如果知道的話）和必點菜色。
-        4. 如果使用者問行程，請考慮路線順暢度。
         
         【使用者目前的行程資料】：
         {json.dumps(context_data, ensure_ascii=False)}
-        
-        請根據上述行程資料來回答。例如使用者問「明天去哪？」，請看行程表回答。
         """
-        
         model = genai.GenerativeModel('models/gemini-1.5-flash')
-        
-        # 組合對話歷史 (Streamlit session_state 格式轉 Gemini 格式)
         chat_history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
         
-        # 加入本次對話
         chat = model.start_chat(history=chat_history)
         response = chat.send_message(system_prompt + "\n\n使用者問題：" + prompt)
-        
         return response.text
     except Exception as e:
         return f"AI 導遊目前有點累（連線錯誤）：{e}"
@@ -110,6 +98,7 @@ def analyze_receipt_image(image_file):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         img = Image.open(image_file)
+        
         prompt = """
         你是一個專業的旅遊記帳助手。請分析這張收據圖片，列出實際購買的商品明細。
         請嚴格遵守以下規則：
@@ -119,20 +108,27 @@ def analyze_receipt_image(image_file):
         4. 【格式】：直接回傳一個 JSON Array，不要有 Markdown 標記。
            範例：[{"name": "コカコーラ (可口可樂)", "price": 140}]
         """
-        # 嘗試優先順序
-        target_model = 'models/gemini-1.5-flash'
+        # 優先順序
+        priority_models = ['models/gemini-2.0-flash', 'models/gemini-1.5-flash']
+        target_model_name = 'models/gemini-1.5-flash'
         try:
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            if 'models/gemini-2.0-flash' in models: target_model = 'models/gemini-2.0-flash'
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            for candidate in priority_models:
+                if candidate in available_models:
+                    target_model_name = candidate
+                    break
         except: pass
         
-        model = genai.GenerativeModel(target_model)
+        model = genai.GenerativeModel(target_model_name)
         response = model.generate_content([prompt, img])
         text = response.text.strip()
-        if text.startswith("```"): text = text.replace("```json", "").replace("```", "")
+        if text.startswith("```"):
+            text = text.replace("```json", "").replace("```", "")
+        
         data = json.loads(text)
         if isinstance(data, dict): return [data]
         return data
+
     except Exception as e:
         return [{"name": f"分析失敗: {e}", "price": 0}]
 
@@ -141,10 +137,12 @@ def analyze_receipt_image(image_file):
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_v14_guide")
+        geolocator = Nominatim(user_agent="trip_planner_v15_final")
         location = geolocator.geocode(location_name)
-        if location: return (location.latitude, location.longitude)
-    except: return None
+        if location:
+            return (location.latitude, location.longitude)
+    except:
+        return None
     return None
 
 # --- 雲端連線 ---
@@ -158,7 +156,8 @@ def get_cloud_connection():
             creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
         client = gspread.authorize(creds)
         return client
-    except: return None
+    except:
+        return None
 
 def save_to_cloud(json_str):
     client = get_cloud_connection()
@@ -167,7 +166,8 @@ def save_to_cloud(json_str):
             sheet = client.open("TripPlanDB").sheet1 
             sheet.update_cell(1, 1, json_str)
             return True, "儲存成功！"
-        except Exception as e: return False, f"寫入失敗: {e}"
+        except Exception as e:
+            return False, f"寫入失敗: {e}"
     return False, "連線失敗"
 
 def load_from_cloud():
@@ -176,7 +176,8 @@ def load_from_cloud():
         try:
             sheet = client.open("TripPlanDB").sheet1
             return sheet.cell(1, 1).value
-        except: return None
+        except:
+            return None
     return None
 
 class WeatherService:
@@ -289,7 +290,7 @@ if "shopping_list" not in st.session_state:
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
-        {"role": "assistant", "content": "你好！我是你的 AI 專業導遊。我可以幫你規劃行程、介紹景點、推薦美食，或提醒你旅遊注意事項。\n\n你可以試著問我：\n📍 清水寺附近有什麼好吃的？\n📅 幫我安排大阪一日遊行程\n⚠️ 去日本要注意什麼？"}
+        {"role": "assistant", "content": "你好！我是你的 AI 專業導遊。我可以幫你規劃行程、介紹景點、推薦美食，或提醒你旅遊注意事項。"}
     ]
 
 current_theme = THEMES[st.session_state.selected_theme_name]
@@ -426,17 +427,6 @@ div[data-testid="stRadio"] label[data-checked="true"] {{
 }}
 .info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
 
-/* Chat Styles */
-.chat-user {{
-    background-color: {c_primary}; color: white; padding: 10px 15px; border-radius: 15px 15px 0 15px;
-    margin: 5px 0; text-align: right; display: inline-block; float: right; clear: both;
-}}
-.chat-bot {{
-    background-color: {c_card}; color: {c_text}; padding: 10px 15px; border-radius: 15px 15px 15px 0;
-    margin: 5px 0; text-align: left; display: inline-block; float: left; clear: both;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-}}
-
 /* UI Tweaks */
 button[data-baseweb="tab"] {{ border-radius: 20px !important; margin-right:5px !important; }}
 div[data-baseweb="input"], div[data-baseweb="base-input"] {{ border: none !important; border-bottom: 1px solid {c_sec} !important; background: transparent !important; }}
@@ -484,6 +474,7 @@ with tab1:
     current_items = st.session_state.trip_data[selected_day_num]
     current_items.sort(key=lambda x: x['time'])
     
+    # 預算儀表板
     all_cost = sum([item.get('cost', 0) for item in current_items])
     all_actual = sum([sum(x['price'] for x in item.get('expenses', [])) for item in current_items])
     
@@ -495,9 +486,11 @@ with tab1:
 
     st.markdown("---")
 
+    # 天氣
     first_loc = current_items[0]['loc'] if current_items and current_items[0]['loc'] else (st.session_state.target_country if st.session_state.target_country != "日本" else "京都")
     weather = WeatherService.get_forecast(first_loc, current_date)
     
+    # HTML 壓縮單行
     weather_html = f"""<div class="apple-weather-widget"><div style="display:flex; align-items:center; gap:15px;"><div style="font-size:2.5rem;">{weather['icon']}</div><div><div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div><div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div></div></div><div style="text-align:right;"><div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div><div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div><div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div></div></div>"""
     st.markdown(weather_html, unsafe_allow_html=True)
 
@@ -523,9 +516,11 @@ with tab1:
         clean_note = item["note"].replace('\n', '<br>')
         note_div = f'<div style="font-size:0.85rem; color:{c_sub}; background:{c_bg}; padding:8px; border-radius:8px; margin-top:8px; line-height:1.4;">📝 {clean_note}</div>' if item['note'] and not is_edit_mode else ""
         
+        # 行程卡片 HTML
         card_html = f"""<div style="display:flex; gap:15px; margin-bottom:0px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="font-weight:700; color:{c_text}; font-size:1.1rem;">{item['time']}</div><div style="flex-grow:1; width:2px; background:{c_sec}; margin:5px 0; opacity:0.3; border-radius:2px;"></div></div><div style="flex-grow:1;"><div class="apple-card" style="margin-bottom:0px;"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div class="apple-title" style="margin-top:0;">{item['title']}</div>{cost_display}</div><div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>{note_div}</div></div></div>"""
         st.markdown(card_html, unsafe_allow_html=True)
 
+        # 明細折疊區 (可隱藏)
         if item.get('expenses'):
             with st.expander(f"🧾 查看消費明細 (合計 ¥{final_cost:,})", expanded=False):
                 for exp in item['expenses']:
@@ -615,7 +610,7 @@ with tab1:
                  st.markdown(trans_html, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 地圖軌跡
+# 2. 地圖軌跡 (回歸路線圖)
 # ==========================================
 with tab2:
     st.subheader(f"🗺️ Day {selected_day_num} 路線圖")
@@ -637,10 +632,23 @@ with tab2:
                 coords = get_lat_lon(item['loc'])
                 if coords:
                     route_coords.append(coords)
-                    plugins.BeautifyIcon(number=idx + 1, border_color="#007AFF", text_color="#007AFF", icon_shape="marker").add_to(folium.Marker(coords, popup=item['title']).add_to(m))
+                    # 使用數字標記 (1, 2, 3...)
+                    plugins.BeautifyIcon(
+                        number=idx + 1,
+                        border_color="#007AFF",
+                        text_color="#007AFF",
+                        icon_shape="marker"
+                    ).add_to(folium.Marker(coords, popup=item['title']).add_to(m))
             
+            # 畫出藍色路線
             if len(route_coords) > 1:
-                folium.PolyLine(route_coords, color="#007AFF", weight=5, opacity=0.8).add_to(m)
+                folium.PolyLine(
+                    route_coords,
+                    color="#007AFF",
+                    weight=5,
+                    opacity=0.8,
+                    tooltip="行程路線"
+                ).add_to(m)
             
             st_folium(m, width="100%", height=400)
         else:
@@ -819,26 +827,21 @@ with tab6:
             st.markdown(f"<div class='apple-card' style='padding:10px; margin-bottom:5px;'>{p[0]}<br><b>{p[1]}</b></div>", unsafe_allow_html=True)
 
 # ==========================================
-# 7. AI 導遊 (新增 Tab 7)
+# 7. AI 導遊
 # ==========================================
 with tab7:
     st.header("🤖 AI 隨身導遊")
     
-    # 聊天顯示區
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
             
-    # 輸入區
     if prompt := st.chat_input("問我行程、美食或交通問題..."):
-        # 顯示使用者訊息
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
             
-        # 生成回應
         with st.spinner("導遊思考中..."):
-            # 準備當前行程資料作為背景知識
             context_data = {
                 "target_country": st.session_state.target_country,
                 "current_trip_data": st.session_state.trip_data,
@@ -846,21 +849,19 @@ with tab7:
             }
             response = ask_ai_guide(prompt, context_data)
             
-        # 顯示 AI 訊息
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         with st.chat_message("assistant"):
             st.write(response)
 
-    # 快速按鈕
     st.markdown("---")
     st.caption("快速提問：")
     col_q1, col_q2, col_q3 = st.columns(3)
-    if col_q1.button("📅 檢視行程建議"):
+    if col_q1.button("📅 檢視行程"):
         st.session_state.chat_history.append({"role": "user", "content": "請幫我檢查目前的行程安排是否順暢，有沒有建議修改的地方？"})
         st.rerun()
-    if col_q2.button("🍜 附近美食推薦"):
+    if col_q2.button("🍜 美食推薦"):
         st.session_state.chat_history.append({"role": "user", "content": "根據我目前的行程地點，推薦一些附近必吃的美食。"})
         st.rerun()
-    if col_q3.button("⚠️ 旅遊注意事項"):
+    if col_q3.button("⚠️ 注意事項"):
         st.session_state.chat_history.append({"role": "user", "content": f"去{st.session_state.target_country}旅遊有什麼需要特別注意的事項或禮儀？"})
         st.rerun()
