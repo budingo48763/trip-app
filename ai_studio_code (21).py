@@ -8,26 +8,27 @@ import json
 from PIL import Image
 
 # --- 套件檢查 ---
+CLOUD_AVAILABLE = False
+MAP_AVAILABLE = False
+GEMINI_AVAILABLE = False
+
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     CLOUD_AVAILABLE = True
-except ImportError:
-    CLOUD_AVAILABLE = False
+except ImportError: pass
 
 try:
     import folium
     from streamlit_folium import st_folium
     from geopy.geocoders import Nominatim
     MAP_AVAILABLE = True
-except ImportError:
-    MAP_AVAILABLE = False
+except ImportError: pass
 
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
+except ImportError: pass
 
 # -------------------------------------
 # 1. 系統設定
@@ -45,45 +46,33 @@ THEMES = {
 # 2. 核心函數
 # -------------------------------------
 def analyze_receipt_image(image_file):
-    # 模擬資料 (若無 API)
-    if not GEMINI_AVAILABLE:
-        return [{"name":"模擬商品A", "price":1200}, {"name":"模擬商品B", "price":800}]
-    
-    if "GEMINI_API_KEY" not in st.secrets:
-        return [{"name":"請設定 Secrets", "price":0}]
-
+    if not GEMINI_AVAILABLE: return [{"name":"模擬商品","price":100}]
+    if "GEMINI_API_KEY" not in st.secrets: return [{"name":"請設API Key","price":0}]
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         img = Image.open(image_file)
-        prompt = """
-        分析收據圖片：
-        1. 提取所有商品名稱與金額。
-        2. 翻譯成繁體中文。
-        3. 排除小計、稅金、找零。
-        4. 回傳 JSON Array: [{"name": "商品", "price": 100}, ...]
-        5. price 為整數。不要 Markdown。
-        """
-        # 自動選擇模型
-        target_model = 'models/gemini-1.5-flash'
+        prompt = "分析收據，列出商品名稱與金額(整數)。翻譯成繁體中文。忽略小計稅金。回傳JSON Array:[{'name':'A','price':100}]。無Markdown。"
+        
+        # 自動選模型
+        model_name = 'models/gemini-1.5-flash'
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    if 'gemini-2.0' in m.name: target_model = m.name; break
+                    if 'gemini-2.0' in m.name: model_name = m.name; break
         except: pass
-
-        model = genai.GenerativeModel(target_model)
-        response = model.generate_content([prompt, img])
-        text = response.text.strip().replace("```json", "").replace("```", "")
-        data = json.loads(text)
+        
+        model = genai.GenerativeModel(model_name)
+        resp = model.generate_content([prompt, img])
+        txt = resp.text.strip().replace("```json", "").replace("```", "")
+        data = json.loads(txt)
         return data if isinstance(data, list) else [data]
-    except:
-        return [{"name": "分析失敗", "price": 0}]
+    except: return [{"name":"分析失敗","price":0}]
 
 @st.cache_data
 def get_lat_lon(name):
     if not MAP_AVAILABLE: return None
     try:
-        loc = Nominatim(user_agent="trip_app_v_final").geocode(name)
+        loc = Nominatim(user_agent="trip_app_v_final_fix").geocode(name)
         return (loc.latitude, loc.longitude) if loc else None
     except: return None
 
@@ -126,31 +115,23 @@ def get_packing(trip, start):
     recs = set()
     has_rain = False
     for day, items in trip.items():
-        loc = items[0]['loc'] if items else "City"
-        w = Weather.get(loc, start + timedelta(days=day-1))
+        w = Weather.get(items[0]['loc'] if items else "City", start + timedelta(days=day-1))
         if w['raw'] in ["Rainy","Snowy"]: has_rain = True
     if has_rain: recs.add("☔ 雨具")
     recs.add("🧢 防曬")
     return list(recs)
 
-# 修正記帳回調函數
 def add_expense_callback(item_id, day_num):
-    n_key = f"in_{item_id}"
-    p_key = f"ip_{item_id}"
-    # 直接從 session_state 讀取
-    n = st.session_state.get(n_key, "")
-    p = st.session_state.get(p_key, 0)
-    
+    n = st.session_state.get(f"in_{item_id}", "")
+    p = st.session_state.get(f"ip_{item_id}", 0)
     if n and p > 0:
-        # 找到對應的 item
         for it in st.session_state.trip_data[day_num]:
             if it['id'] == item_id:
                 if "expenses" not in it: it["expenses"] = []
                 it['expenses'].append({"name": n, "price": p})
                 it['cost'] = sum(x['price'] for x in it['expenses'])
-                # 清空輸入
-                st.session_state[n_key] = ""
-                st.session_state[p_key] = 0
+                st.session_state[f"in_{item_id}"] = ""
+                st.session_state[f"ip_{item_id}"] = 0
                 break
 
 def get_map_link(loc):
@@ -218,9 +199,9 @@ PHRASES = {
 if st.session_state.target_country not in PHRASES: PHRASES[st.session_state.target_country] = {"通用": [("你好","Hello")]}
 
 # -------------------------------------
-# 4. CSS (安全寫法，避免 SyntaxError)
+# 4. CSS
 # -------------------------------------
-css_template = """
+css_code = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=Inter:wght@400;600&display=swap');
 .stApp { background-color: __BG__ !important; color: __TXT__ !important; font-family: 'Inter', sans-serif !important; }
@@ -245,8 +226,8 @@ input { color: __TXT__ !important; }
 </style>
 """
 for k, v in [("__BG__", cur['bg']), ("__TXT__", cur['text']), ("__PRI__", cur['primary']), ("__SEC__", cur['secondary']), ("__CARD__", cur['card'])]:
-    css_template = css_template.replace(k, v)
-st.markdown(css_template, unsafe_allow_html=True)
+    css_code = css_code.replace(k, v)
+st.markdown(css_code, unsafe_allow_html=True)
 
 # -------------------------------------
 # 5. UI
@@ -308,10 +289,10 @@ with t1:
         
         exp_htm = ""
         if item.get('expenses'):
-            rows = "".join([f"<div style='display:flex;justify-content:space-between;font-size:0.8rem;color:#666;'><span>{e['name']}</span><span>¥{e['price']:,}</span></div>" for e in item['expenses']])
+            rows = "".join([f"<div style='display:flex;justify-content:space-between;font-size:0.8rem;color:#888;'><span>{e['name']}</span><span>¥{e['price']:,}</span></div>" for e in item['expenses']])
             exp_htm = f"<div style='margin-top:5px;padding-top:5px;border-top:1px dashed #DDD;'>{rows}</div>"
 
-        st.markdown(f"""<div style="display:flex;gap:10px;margin-bottom:0px;"><div style="width:50px;text-align:center;font-weight:bold;">{item['time']}<br><div style="height:100%;width:2px;background:{cur['secondary']};margin:0 auto;"></div></div><div style="flex:1;"><div class="apple-card"><div style="display:flex;justify-content:space-between;"><b>{item['title']}</b>{cost_tg}</div><div style="font-size:0.85rem;color:#666;">📍 {item['loc']}{mbtn}</div><div style="font-size:0.85rem;background:{cur['bg']};padding:5px;margin-top:5px;border-radius:5px;">📝 {item['note']}</div>{exp_htm}</div></div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div style="display:flex;gap:10px;margin-bottom:0px;"><div style="width:50px;text-align:center;font-weight:bold;">{item['time']}<br><div style="height:100%;width:2px;background:{cur['secondary']};margin:0 auto;"></div></div><div style="flex:1;"><div class="apple-card"><div style="display:flex;justify-content:space-between;"><b>{item['title']}</b>{cost_tg}</div><div style="font-size:0.85rem;color:#666;">📍 {item['loc'] or '未設定'}{mbtn}</div><div style="font-size:0.85rem;background:{cur['bg']};padding:5px;margin-top:5px;border-radius:5px;">📝 {item['note']}</div>{exp_htm}</div></div></div>""", unsafe_allow_html=True)
 
         if is_edit:
             with st.container(border=True):
@@ -322,14 +303,14 @@ with t1:
                 item['cost'] = st.number_input("算", value=item['cost'], step=100, key=f"c_{item['id']}")
                 item['note'] = st.text_area("註", item['note'], key=f"n_{item['id']}")
                 
-                st.caption("📷 收據 (多筆自動加入)")
+                st.caption("📷 收據")
                 cam = st.toggle("相機", key=f"tg_{item['id']}")
                 if cam: ufile = st.camera_input("拍", key=f"cm_{item['id']}", label_visibility="collapsed")
                 else: ufile = st.file_uploader("傳", type=["jpg","png"], key=f"up_{item['id']}", label_visibility="collapsed")
                 
                 fk = f"scan_ok_{item['id']}"
                 if ufile and not st.session_state.get(fk, False):
-                    with st.spinner("分析..."):
+                    with st.spinner("分析中..."):
                         res = analyze_receipt_image(ufile)
                     cnt = 0
                     for r in res:
@@ -345,9 +326,8 @@ with t1:
                 if not ufile: st.session_state[fk] = False
 
                 cx1, cx2, cx3 = st.columns([2,1,1])
-                # 使用新的 callback 機制
-                cx1.text_input("項", key=f"in_{item['id']}")
-                cx2.number_input("金", min_value=0, key=f"ip_{item['id']}")
+                st.session_state[f"in_{item['id']}"] = cx1.text_input("項", key=f"inp_{item['id']}")
+                st.session_state[f"ip_{item['id']}"] = cx2.number_input("金", min_value=0, key=f"ipp_{item['id']}")
                 cx3.button("➕", key=f"bt_{item['id']}", on_click=add_expense_callback, args=(item['id'], day))
                 
                 if item.get('expenses'):
@@ -358,7 +338,7 @@ with t1:
                             if c_d2.button("X", key=f"dx_{item['id']}_{idx}"):
                                 item['expenses'].pop(idx)
                                 st.rerun()
-                if st.button("🗑️ 刪除", key=f"rm_{item['id']}"):
+                if st.button("🗑️", key=f"rm_{item['id']}"):
                     st.session_state.trip_data[day].pop(i)
                     st.rerun()
 
@@ -376,9 +356,6 @@ with t1:
 # --- Tab 2: 地圖 ---
 with t2:
     m_items = sorted(st.session_state.trip_data[day], key=lambda x: x['time'])
-    url = get_route_link(m_items)
-    st.markdown(f"<div style='text-align:center;margin-bottom:10px;'><a href='{url}' target='_blank' style='background:{cur['primary']};color:white;padding:10px 20px;border-radius:20px;text-decoration:none;'>Google Maps 導航</a></div>", unsafe_allow_html=True)
-    if MAP_AVAILABLE:
-        valid = [x for x in m_items if x['loc']]
-        if valid:
-            start = get_lat_lon(valid[0]['loc']) or [35.6895, 139
+    valid = [i for i in m_items if i['loc']]
+    gurl = f"https://www.google.com/maps/dir/{'/'.join([urllib.parse.quote(i['loc']) for i in valid])}" if valid else "#"
+    st.markdown(f"<div style='text-align:center;margin-bottom:10px;'><a href='{gurl}' target='_blank' style='background:{cur['primary']};color:white;padding:10px 20px;border-radius:20px;text-decoration:none;'>Google Maps 導航</a></div>"
