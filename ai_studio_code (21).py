@@ -19,7 +19,6 @@ except ImportError:
 # --- Google Gemini 套件 ---
 try:
     import google.generativeai as genai
-    from google.api_core import exceptions as google_exceptions
     from PIL import Image
     GEMINI_AVAILABLE = True
 except ImportError:
@@ -47,139 +46,110 @@ THEMES = {
 }
 
 # -------------------------------------
-# 2. 核心功能函數 (AI 核心升級)
+# 2. 核心功能函數
 # -------------------------------------
 
-# --- 👑 萬能模型路由與重試機制 ---
-def get_generative_model():
-    """
-    智慧選擇模型：
-    1. 優先使用 1.5-flash-8b (速度快、額度最高)
-    2. 其次使用 2.0-flash (最新)
-    3. 最後使用 1.5-flash (標準)
-    """
+# --- 關鍵修復：自動取得可用的 Gemini 模型 ---
+def get_gemini_model():
+    """自動偵測並回傳一個可用的 GenerativeModel 物件"""
     if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
         return None
 
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    
-    # 定義模型優先順序 (包含別名以防 404)
-    # 注意：Flash-8b 是目前針對免費額度最友善的模型
-    model_candidates = [
-        'models/gemini-1.5-flash-8b',       # 極速、高額度
-        'models/gemini-2.0-flash-exp',      # 最新預覽
-        'models/gemini-1.5-flash',          # 標準版
-        'models/gemini-1.5-flash-latest',   # 確保指向最新
-        'models/gemini-pro'                 # 最後備案
-    ]
-    
-    # 這裡我們不預先 check list_models，因為那樣會浪費一次 API 呼叫
-    # 我們直接回傳一個包裝好的函數，在執行時自動切換
-    return model_candidates
-
-def safe_generate_content(prompt, image=None, stream=False):
-    """
-    執行 AI 生成，包含自動重試與模型切換機制
-    """
-    model_list = get_generative_model()
-    if not model_list:
-        if stream:
-            yield "⚠️ 請先設定 API Key。"
-            return
-        else:
-            return None
-
-    last_error = None
-
-    # 嘗試清單中的每一個模型
-    for model_name in model_list:
-        try:
-            model = genai.GenerativeModel(model_name)
-            
-            # 準備輸入內容
-            inputs = [prompt]
-            if image:
-                inputs.append(image)
-            
-            # 執行生成
-            if stream:
-                response = model.generate_content(inputs, stream=True)
-                # 測試這個 iterator 是否正常 (捕捉 404/429)
-                for chunk in response:
-                    if chunk.text:
-                        yield chunk.text
-                return # 成功就結束
-            else:
-                response = model.generate_content(inputs)
-                return response.text
-                
-        except Exception as e:
-            # 捕捉錯誤，如果是 429 (Quota) 或 404 (Not Found) 就換下一個模型
-            last_error = e
-            time.sleep(1) # 冷卻一下
-            continue # 嘗試下一個模型
-
-    # 如果全部都失敗
-    error_msg = f"AI 暫時無法回應 (所有模型皆忙碌或額度不足)。錯誤: {last_error}"
-    if stream:
-        yield error_msg
-    else:
-        return None
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        # 擴充模型清單，包含各種變體以防 404
+        priority_list = [
+            'models/gemini-2.0-flash-exp',
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-latest',
+            'models/gemini-1.5-flash-001',
+            'models/gemini-1.5-flash-002',
+            'models/gemini-1.5-pro',
+            'models/gemini-1.5-pro-latest',
+            'models/gemini-pro'
+        ]
+        
+        target_model = 'models/gemini-1.5-flash' # 預設值
+        
+        # 嘗試列出所有可用模型
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 如果 API Key 有效，從優先清單中挑選第一個可用的
+        for p in priority_list:
+            if p in available_models:
+                target_model = p
+                break
+        
+        return genai.GenerativeModel(target_model)
+        
+    except Exception:
+        # 如果連 list_models 都失敗，直接盲猜最通用的模型
+        return genai.GenerativeModel('gemini-1.5-flash')
 
 # --- AI 導遊對話 ---
 def ask_ai_guide_stream(prompt, context_data):
-    system_prompt = f"""
-    你是一位專業導遊。
-    【使用者行程】：{json.dumps(context_data, ensure_ascii=False)}
-    """
-    full_prompt = system_prompt + "\n使用者：" + prompt
-    
-    # 使用安全生成函式
-    return safe_generate_content(full_prompt, stream=True)
+    model = get_gemini_model()
+    if not model:
+        yield "系統提示：請先安裝套件並設定 API Key。"
+        return
+
+    try:
+        system_prompt = f"""
+        你是一位專業導遊。
+        【使用者行程】：{json.dumps(context_data, ensure_ascii=False)}
+        """
+        
+        history = []
+        if "chat_history" in st.session_state:
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "assistant" and "AI" in msg["content"]: continue
+                role = "user" if msg["role"] == "user" else "model"
+                history.append({"role": role, "parts": [msg["content"]]})
+        
+        chat = model.start_chat(history=history)
+        response = chat.send_message(system_prompt + "\n使用者：" + prompt, stream=True)
+        for chunk in response:
+            if chunk.text: yield chunk.text
+    except Exception as e:
+        yield f"AI 連線錯誤: {e}"
 
 # --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
-    prompt = f"""
-    使用者正在 {country} 旅遊。
-    當下行程：{item['title']} (地點: {item['loc']})
-    備註：{item['note']}
-    
-    請提供約 100 字的簡短建議(注意事項、看點或美食)。語氣輕鬆。
-    """
-    return safe_generate_content(prompt, stream=True)
+    model = get_gemini_model()
+    if not model:
+        yield "⚠️ AI 未啟用"
+        return
+
+    try:
+        prompt = f"""
+        使用者正在 {country} 旅遊。
+        當下行程：{item['title']} (地點: {item['loc']})
+        備註：{item['note']}
+        
+        請提供約 100 字的簡短建議(注意事項、看點或美食)。
+        """
+        response = model.generate_content(prompt, stream=True)
+        for chunk in response:
+            if chunk.text: yield chunk.text
+    except Exception as e:
+        yield f"連線錯誤: {e}"
 
 # --- 收據分析 ---
 def analyze_receipt_image(image_file):
-    if not GEMINI_AVAILABLE:
+    model = get_gemini_model()
+    if not model:
         return [{"name": "模擬商品", "price": 100}]
-    
     try:
         img = Image.open(image_file)
         prompt = "分析收據，列出商品與金額，排除小計稅金，回傳 JSON Array: [{'name':str, 'price':int}]"
-        
-        # 使用非串流模式的安全生成
-        result_text = safe_generate_content(prompt, image=img, stream=False)
-        
-        if not result_text:
-            return [{"name": "AI 連線失敗", "price": 0}]
-
-        text = result_text.strip().replace("```json", "").replace("```", "")
+        response = model.generate_content([prompt, img])
+        text = response.text.strip().replace("```json", "").replace("```", "")
         data = json.loads(text)
         return data if isinstance(data, list) else [data]
-    except Exception as e:
-        return [{"name": f"分析失敗: {e}", "price": 0}]
-
-# --- 地理編碼 ---
-@st.cache_data
-def get_lat_lon(location_name):
-    # 這裡不依賴 map_available，只依賴 geopy (通常預裝或易裝)
-    try:
-        from geopy.geocoders import Nominatim
-        geolocator = Nominatim(user_agent="trip_planner_v20_final")
-        location = geolocator.geocode(location_name)
-        if location: return (location.latitude, location.longitude)
-    except: return None
-    return None
+    except:
+        return [{"name": "分析失敗", "price": 0}]
 
 # --- 雲端連線 ---
 def get_cloud_connection():
@@ -213,17 +183,33 @@ def load_from_cloud():
         except: return None
     return None
 
-def get_packing_recommendations(trip_data, start_date):
-    # 簡易規則，不依賴 API 以節省額度
-    recommendations = set()
-    month = start_date.month
-    
-    # 季節判斷
-    if 12 <= month or month <= 2: recommendations.update(["🧣 圍巾/手套", "🧥 保暖大衣", "🧴 保濕乳液"]) # 冬
-    elif 6 <= month <= 9: recommendations.update(["🕶️ 太陽眼鏡", "🧢 帽子", "🧴 防曬乳", "☔ 折疊傘"]) # 夏
-    else: recommendations.update(["🧥 薄外套", "🧣 絲巾"]) # 春秋
+class WeatherService:
+    WEATHER_ICONS = {"Sunny": "☀️", "Cloudy": "☁️", "Rainy": "🌧️", "Snowy": "❄️"}
+    @staticmethod
+    def get_forecast(location, date_obj):
+        seed_str = f"{location}{date_obj.strftime('%Y%m%d')}"
+        random.seed(seed_str)
+        base_temp = 20 if date_obj.month not in [12,1,2] else 5
+        high = base_temp + random.randint(0, 5)
+        low = base_temp - random.randint(3, 8)
+        cond = random.choice(["Sunny", "Cloudy", "Rainy"])
+        desc_map = {"Sunny": "晴時多雲", "Cloudy": "陰天", "Rainy": "有雨", "Snowy": "降雪"}
+        return {"high": high, "low": low, "icon": WeatherService.WEATHER_ICONS[cond], "desc": desc_map.get(cond, cond), "raw": cond}
 
-    recommendations.update(["護照", "外幣/信用卡", "網卡/Wifi機", "充電器/行動電源", "常備藥品"])
+def get_packing_recommendations(trip_data, start_date):
+    recommendations = set()
+    has_rain = False
+    min_temp = 100
+    for day, items in trip_data.items():
+        loc = items[0]['loc'] if items else "City"
+        w = WeatherService.get_forecast(loc, start_date + timedelta(days=day-1))
+        if w['raw'] in ["Rainy", "Snowy"]: has_rain = True
+        min_temp = min(min_temp, w['low'])
+    
+    if has_rain: recommendations.update(["☔ 折疊傘/雨衣", "👞 防水噴霧"])
+    if min_temp < 12: recommendations.update(["🧣 圍巾", "🧥 保暖外套", "🧤 手套"])
+    elif min_temp < 20: recommendations.update(["🧥 薄外套"])
+    if min_temp > 25: recommendations.update(["🕶️ 太陽眼鏡", "🧢 帽子", "🧴 防曬"])
     return list(recommendations)
 
 def add_expense_callback(item_id, day_num):
@@ -278,17 +264,22 @@ if "wishlist" not in st.session_state:
         {"id": 901, "title": "HARBS 千層蛋糕", "loc": "大丸京都店", "note": "必吃水果千層"},
         {"id": 902, "title": " % Arabica 咖啡", "loc": "嵐山", "note": "網美打卡點"}
     ]
-
 if "shopping_list" not in st.session_state:
     st.session_state.shopping_list = pd.DataFrame(columns=["對象", "商品名稱", "預算(¥)", "已購買"])
-
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
 
-if "trigger_ai" not in st.session_state: st.session_state.trigger_ai = False
-if "trigger_query" not in st.session_state: st.session_state.trigger_query = ""
-if "current_step_index" not in st.session_state: st.session_state.current_step_index = 0
-if "ai_advice_cache" not in st.session_state: st.session_state.ai_advice_cache = {}
+# Live 進度追蹤專用變數
+if "current_step_index" not in st.session_state:
+    st.session_state.current_step_index = 0
+if "ai_advice_cache" not in st.session_state:
+    st.session_state.ai_advice_cache = {} 
+
+# 用來觸發快速按鈕的 AI 請求
+if "trigger_ai" not in st.session_state:
+    st.session_state.trigger_ai = False
+if "trigger_query" not in st.session_state:
+    st.session_state.trigger_query = ""
 
 default_checklist = {
     "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
@@ -336,23 +327,23 @@ TRANSPORT_OPTIONS = ["🚆 電車", "🚌 巴士", "🚶 步行", "🚕 計程�
 SURVIVAL_PHRASES = {
     "日本": {
         "招呼": [("你好", "こんにちは"), ("謝謝", "ありがとう"), ("不好意思", "すみません")],
-        "點餐": [("請給我這個", "これをください"), ("買單", "お会計お願いします"), ("多少錢？", "いくらですか")],
+        "點餐": [("請給我這個", "これをください"), ("買單", "お会計お願いします")],
         "交通": [("...在哪裡？", "…はどこですか？"), ("車站", "駅"), ("廁所", "トイレ")]
     },
     "韓國": {
-        "招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다"), ("不好意思", "저기요")],
-        "點餐": [("請給我這個", "이거 주세요"), ("買單", "계산해 주세요"), ("好", "네")],
-        "交通": [("...在哪裡？", "... 어디에요?"), ("車站", "역"), ("洗手間", "화장실")]
+        "招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다")],
+        "點餐": [("請給我這個", "이거 주세요"), ("買單", "계산해 주세요")],
+        "交通": [("...在哪裡？", "... 어디에요?"), ("洗手間", "화장실")]
     },
     "泰國": {
         "招呼": [("你好", "Sawasdee"), ("謝謝", "Khop khun")],
         "點餐": [("我要這個", "Ao an nee"), ("多少錢", "Tao rai?")],
-        "交通": [("去...", "Bai ..."), ("廁所", "Hong nam"), ("機場", "Sanam bin")]
+        "交通": [("去...", "Bai ..."), ("廁所", "Hong nam")]
     }
 }
 
 # -------------------------------------
-# 4. CSS 樣式
+# 4. CSS 樣式 (美化版)
 # -------------------------------------
 c_bg = current_theme['bg']
 c_text = current_theme['text']
@@ -364,76 +355,74 @@ c_sec = current_theme['secondary']
 main_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
-
 .stApp {{ background-color: {c_bg} !important; color: {c_text} !important; font-family: 'Inter', sans-serif !important; }}
 [data-testid="stSidebarCollapsedControl"], footer {{ display: none !important; }}
 header[data-testid="stHeader"] {{ height: 0 !important; background: transparent !important; }}
 
-/* Live Progress Style */
+/* Live Card */
 .live-card {{
     background: linear-gradient(145deg, {c_card}, {c_sec});
-    border-left: 6px solid {c_primary};
-    border-radius: 15px; padding: 25px; margin-bottom: 20px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    border-left: 6px solid {c_primary}; border-radius: 16px;
+    padding: 25px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.08);
 }}
-.live-title {{ font-size: 1.8rem; font-weight: 900; color: {c_text}; margin-bottom: 5px; }}
-.live-time {{ font-size: 1.2rem; font-weight: bold; color: {c_primary}; }}
-.live-meta {{ font-size: 1rem; color: {c_sub}; margin-top: 5px; display: flex; align-items: center; gap: 5px; }}
-.next-item {{ opacity: 0.6; padding: 10px; border-left: 2px solid #CCC; margin-top: 10px; font-size: 0.9rem; }}
+.live-title {{ font-size: 1.6rem; font-weight: 900; color: {c_text}; margin-bottom: 5px; }}
+.live-meta {{ font-size: 0.95rem; color: {c_sub}; margin-top: 5px; }}
 
-/* AI Box */
-.ai-box {{
-    background: #F0F8FF; border: 1px solid #BEE3F8; border-radius: 12px;
-    padding: 15px; margin-top: 15px; color: #2C5282;
-}}
-
-/* Common Styles */
-.apple-card {{
-    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px);
-    border-radius: 18px; padding: 18px; margin-bottom: 0px;
-    border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
-}}
-.trans-card {{
-    background: #FFFFFF; border-radius: 12px; padding: 10px 15px;
-    margin: 10px 0 10px 50px; border: 1px solid #E0E0E0;
-    display: flex; align-items: center; justify-content: space-between;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-}}
-.apple-weather-widget {{
-    background: linear-gradient(135deg, {c_primary} 0%, {c_text} 150%);
-    color: white; padding: 15px 20px; border-radius: 20px;
-    margin-bottom: 25px; box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-    display: flex; align-items: center; justify-content: space-between;
-}}
-.info-card {{
-    background-color: {c_card}; border-radius: 12px; padding: 20px; margin-bottom: 15px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0;
-}}
-.info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
+/* Apple Style Info Card (Flight) */
 .flight-card {{
     background: {c_card}; border-radius: 16px; padding: 20px; margin-bottom: 15px;
     border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     position: relative; overflow: hidden;
 }}
-.flight-card::before {{ content: ''; position: absolute; top: 0; left: 0; width: 6px; height: 100%; background: {c_primary}; }}
+.flight-card::before {{
+    content: ''; position: absolute; top: 0; left: 0; width: 6px; height: 100%;
+    background: {c_primary};
+}}
+.flight-header {{ display: flex; justify-content: space-between; font-size: 0.9rem; color: {c_sub}; margin-bottom: 10px; }}
+.flight-route {{ display: flex; align-items: center; justify-content: space-between; margin: 15px 0; }}
+.flight-code {{ font-size: 2rem; font-weight: 900; color: {c_text}; }}
+.flight-plane {{ font-size: 1.5rem; color: {c_primary}; }}
+
+/* Hotel Card */
+.hotel-card {{
+    background: {c_card}; border-radius: 16px; overflow: hidden; margin-bottom: 15px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.05);
+}}
+.hotel-img-placeholder {{
+    height: 120px; background: linear-gradient(45deg, {c_sec}, {c_primary});
+    display: flex; align-items: center; justify-content: center; font-size: 3rem; color: white;
+}}
+.hotel-body {{ padding: 15px; }}
+.hotel-name {{ font-size: 1.2rem; font-weight: bold; margin-bottom: 5px; color: {c_text}; }}
+.hotel-meta {{ font-size: 0.85rem; color: {c_sub}; display: flex; gap: 10px; align-items: center; }}
+.hotel-badge {{ background: {c_sec}; color: {c_text}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
+
+/* Widget Card (Tools) */
 .widget-card {{
     background: {c_card}; border-radius: 20px; padding: 20px; margin-bottom: 15px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.06); text-align: center;
     border: 1px solid rgba(0,0,0,0.03);
 }}
+.widget-icon {{ font-size: 2.5rem; margin-bottom: 10px; }}
+.widget-value {{ font-size: 1.8rem; font-weight: 900; color: {c_primary}; }}
+.widget-label {{ font-size: 0.9rem; color: {c_sub}; }}
+
+/* SOS Card */
 .sos-card {{
     background: #FF3B30; color: white; border-radius: 20px; padding: 25px;
     text-align: center; box-shadow: 0 10px 30px rgba(255, 59, 48, 0.3);
+    cursor: pointer; transition: transform 0.1s;
 }}
+.sos-card:active {{ transform: scale(0.98); }}
+.sos-title {{ font-size: 2rem; font-weight: 900; }}
+.sos-sub {{ font-size: 1rem; opacity: 0.9; margin-bottom: 10px; }}
 
-/* UI Tweaks */
-div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; padding: 4px !important; border-radius: 12px !important; overflow-x: auto; flex-wrap: nowrap; }}
-div[data-testid="stRadio"] label {{ background-color: transparent !important; border: none !important; flex: 1 !important; text-align: center !important; border-radius: 9px !important; }}
+/* AI Box */
+.ai-box {{ background: #F0F8FF; border: 1px solid #BEE3F8; border-radius: 12px; padding: 15px; color: #2C5282; }}
+
+/* General Overrides */
+div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; border-radius: 12px !important; }}
 div[data-testid="stRadio"] label[data-checked="true"] {{ background-color: {c_card} !important; color: {c_text} !important; font-weight: bold !important; }}
-
-button[data-baseweb="tab"] {{ border-radius: 20px !important; margin-right:5px !important; }}
-div[data-baseweb="input"], div[data-baseweb="base-input"] {{ border: none !important; border-bottom: 1px solid {c_sec} !important; background: transparent !important; }}
-input {{ color: {c_text} !important; }}
 </style>
 """
 st.markdown(main_css, unsafe_allow_html=True)
@@ -487,13 +476,13 @@ with tab1:
         st.info("📭 請先到「📅 行程」分頁新增行程。")
     else:
         curr = all_steps[st.session_state.current_step_index]
-        # 尋找真實物件參照 (為了記帳同步)
         real_item = None
+        # 尋找真實 item
         for item in st.session_state.trip_data[curr['day_num']]:
             if item['id'] == curr['id']:
                 real_item = item
                 break
-
+        
         prog = (st.session_state.current_step_index) / len(all_steps)
         st.progress(prog, text=f"旅程進度 {int(prog*100)}%")
         
@@ -512,8 +501,8 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
         
-        # 記帳 (Moved here)
-        with st.expander("💰 快速記帳 (點擊展開)", expanded=False):
+        # 記帳區塊
+        with st.expander("💰 快速記帳", expanded=False):
             if real_item:
                 input_method = st.radio("方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"live_in_{curr['id']}")
                 uploaded_receipt = None
@@ -550,9 +539,10 @@ with tab1:
                         real_item['expenses'].append({"name": new_n, "price": new_p})
                         real_item['cost'] = sum(x['price'] for x in real_item['expenses'])
                         st.rerun()
+
                 if real_item.get('expenses'):
                     st.divider()
-                    st.caption(f"已記錄: ¥{real_item['cost']:,}")
+                    st.caption(f"已記錄花費 (總計 ¥{real_item['cost']:,})")
                     for ex in real_item['expenses']:
                         st.text(f"{ex['name']} : ¥{ex['price']:,}")
 
@@ -560,7 +550,7 @@ with tab1:
         st.markdown("### ✨ AI 即時建議")
         item_id = curr['id']
         if item_id not in st.session_state.ai_advice_cache:
-            with st.spinner("🤖 導遊思考中..."):
+            with st.spinner("🤖 導遊正在分析..."):
                 resp = ""
                 ph = st.empty()
                 for chunk in get_ai_step_advice_stream(curr, st.session_state.target_country):
@@ -587,7 +577,10 @@ with tab1:
 # 2. 行程規劃
 # ==========================================
 with tab2:
-    selected_day_num = st.radio("DaySelect", list(range(1, st.session_state.trip_days_count + 1)), index=0, horizontal=True, label_visibility="collapsed", format_func=lambda x: f"Day {x}")
+    selected_day_num = st.radio("DaySelect", list(range(1, st.session_state.trip_days_count + 1)), 
+                                index=0, horizontal=True, label_visibility="collapsed", 
+                                format_func=lambda x: f"Day {x}")
+    
     current_date = st.session_state.start_date + timedelta(days=selected_day_num - 1)
     current_items = st.session_state.trip_data[selected_day_num]
     current_items.sort(key=lambda x: x['time'])
@@ -597,12 +590,8 @@ with tab2:
     
     c1, c2 = st.columns(2)
     c1.metric("預算", f"¥{all_cost:,}")
-    c2.metric("支出", f"¥{all_actual:,}")
+    c2.metric("支出", f"¥{all_actual:,}", delta=f"{all_cost - all_actual:,}" if all_actual > 0 else None)
     st.markdown("---")
-    
-    first_loc = current_items[0]['loc'] if current_items and current_items[0]['loc'] else (st.session_state.target_country if st.session_state.target_country != "日本" else "京都")
-    weather = WeatherService.get_forecast(first_loc, current_date)
-    st.markdown(f"""<div class="apple-weather-widget"><div style="display:flex; align-items:center; gap:15px;"><div style="font-size:2.5rem;">{weather['icon']}</div><div><div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div><div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div></div></div><div style="text-align:right;"><div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div><div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div><div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div></div></div>""", unsafe_allow_html=True)
     
     is_edit_mode = st.toggle("編輯模式")
     if is_edit_mode and st.button("➕ 新增行程", use_container_width=True):
@@ -618,7 +607,7 @@ with tab2:
         
         if item.get('expenses'):
             total_ex = sum(x['price'] for x in item['expenses'])
-            with st.expander(f"🧾 查看明細 (¥{total_ex:,})", expanded=False):
+            with st.expander(f"🧾 明細 (¥{total_ex:,})", expanded=False):
                 for exp in item['expenses']:
                     st.markdown(f"- {exp['name']}: ¥{exp['price']:,}")
 
@@ -628,7 +617,6 @@ with tab2:
                 item['title'] = c1.text_input("名稱", item['title'], key=f"t_{item['id']}")
                 item['time'] = c2.time_input("時間", datetime.strptime(item['time'], "%H:%M").time(), key=f"tm_{item['id']}").strftime("%H:%M")
                 item['loc'] = st.text_input("地點", item['loc'], key=f"l_{item['id']}")
-                item['cost'] = st.number_input("預算 (¥)", value=item['cost'], step=100, key=f"c_{item['id']}")
                 item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
                 if st.button("🗑️ 刪除", key=f"del_{item['id']}"):
                     st.session_state.trip_data[selected_day_num].pop(index)
@@ -638,15 +626,14 @@ with tab2:
             next_item = current_items[index+1]
             nav_link = generate_google_nav_link(item['loc'], next_item['loc'])
             t_mode = item.get('trans_mode', '📍 移動')
-            t_min = item.get('trans_min', 30)
-            st.markdown(f"""<div style="display:flex; gap:15px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="flex-grow:1; width:2px; border-left:2px dashed {c_sec}; margin:0; opacity:0.6;"></div></div><div style="flex-grow:1; padding:5px 0;"><div class="trans-card"><div style="display:flex; flex-direction:column;"><div style="font-size:0.7rem; color:#888; margin-bottom:2px;">推薦路線 (RECOMMENDED)</div><div style="display:flex; align-items:center; gap:8px;"><div style="font-weight:bold; font-size:0.9rem;">{t_mode}</div><div class="trans-tag">最快速</div></div></div><div style="text-align:right;"><div style="font-weight:bold; font-size:0.9rem;">{t_min} min</div><a href="{nav_link}" target="_blank" style="text-decoration:none; font-size:0.75rem; color:#007AFF;">➤ 導航</a></div></div></div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div style="display:flex; gap:15px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="flex-grow:1; width:2px; border-left:2px dashed {c_sec}; margin:0; opacity:0.6;"></div></div><div style="flex-grow:1; padding:5px 0;"><div class="trans-card"><div style="display:flex; flex-direction:column;"><div style="font-size:0.7rem; color:#888; margin-bottom:2px;">推薦路線 (RECOMMENDED)</div><div style="display:flex; align-items:center; gap:8px;"><div style="font-weight:bold; font-size:0.9rem;">{t_mode}</div><div class="trans-tag">最快速</div></div></div><div style="text-align:right;"><div style="font-weight:bold; font-size:0.9rem;">{item.get('trans_min', 30)} min</div><a href="{nav_link}" target="_blank" style="text-decoration:none; font-size:0.75rem; color:#007AFF;">➤ 導航</a></div></div></div></div>""", unsafe_allow_html=True)
 
 # ==========================================
 # 3. 願望清單
 # ==========================================
 with tab3:
     st.subheader("✨ 願望清單")
-    with st.expander("➕ 新增願望", expanded=False):
+    with st.expander("➕ 新增", expanded=False):
         w_title = st.text_input("名稱")
         w_loc = st.text_input("地點")
         w_note = st.text_input("備註")
@@ -662,8 +649,6 @@ with tab3:
                 new_item = {"id": int(time.time()), "time": "09:00", "title": wish['title'], "loc": wish['loc'], "cost": 0, "cat": "spot", "note": wish['note'], "expenses": [], "trans_mode": "📍 移動", "trans_min": 30}
                 st.session_state.trip_data[target_day].append(new_item)
                 st.session_state.wishlist.pop(i)
-                st.toast(f"已排入 Day {target_day}")
-                time.sleep(1)
                 st.rerun()
             if c3.button("刪", key=f"wdl_{wish['id']}"):
                 st.session_state.wishlist.pop(i)
@@ -673,8 +658,7 @@ with tab3:
 # 4. 準備清單
 # ==========================================
 with tab4:
-    recs = get_packing_recommendations(st.session_state.trip_data, st.session_state.start_date)
-    st.info(f"**🌤️ 智能穿搭推薦**\n建議攜帶：" + "、".join(recs))
+    st.subheader("🎒 準備清單")
     for category, items in st.session_state.checklist.items():
         st.markdown(f"**{category}**")
         cols = st.columns(2)
@@ -689,36 +673,107 @@ with tab5:
     flights = st.session_state.flight_info
     f_out = flights['outbound']
     f_in = flights['inbound']
-    st.markdown(f"""
-    <div class="flight-card"><div class="flight-header"><span>DEPARTURE</span><span>{f_out['date']}</span></div><div class="flight-route"><div class="flight-code">{f_out['dep_loc']}</div><div class="flight-plane">✈</div><div class="flight-code">{f_out['arr_loc']}</div></div><div style="display:flex; justify-content:space-between; font-weight:bold;"><div>{f_out['dep']}</div><div>{f_out['code']}</div><div>{f_out['arr']}</div></div></div>
-    <div class="flight-card"><div class="flight-header"><span>RETURN</span><span>{f_in['date']}</span></div><div class="flight-route"><div class="flight-code">{f_in['dep_loc']}</div><div class="flight-plane">✈</div><div class="flight-code">{f_in['arr_loc']}</div></div><div style="display:flex; justify-content:space-between; font-weight:bold;"><div>{f_in['dep']}</div><div>{f_in['code']}</div><div>{f_in['arr']}</div></div></div>
-    """, unsafe_allow_html=True)
     
+    st.markdown(f"""
+    <div class="flight-card">
+        <div class="flight-header"><span>DEPARTURE</span><span>{f_out['date']}</span></div>
+        <div class="flight-route">
+            <div class="flight-code">{f_out['dep_loc']}</div>
+            <div class="flight-plane">✈</div>
+            <div class="flight-code">{f_out['arr_loc']}</div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-weight:bold;">
+            <div>{f_out['dep']}</div>
+            <div>{f_out['code']}</div>
+            <div>{f_out['arr']}</div>
+        </div>
+    </div>
+    <div class="flight-card">
+        <div class="flight-header"><span>RETURN</span><span>{f_in['date']}</span></div>
+        <div class="flight-route">
+            <div class="flight-code">{f_in['dep_loc']}</div>
+            <div class="flight-plane">✈</div>
+            <div class="flight-code">{f_in['arr_loc']}</div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-weight:bold;">
+            <div>{f_in['dep']}</div>
+            <div>{f_in['code']}</div>
+            <div>{f_in['arr']}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.divider()
     st.subheader("🏨 住宿")
-    if edit_info_mode := st.toggle("✏️ 編輯資訊"):
-        if st.button("➕ 新增住宿"):
-            st.session_state.hotel_info.append({"id": int(time.time()), "name": "新飯店", "range": "D1-D2", "date": "", "addr": "", "link": ""})
-            st.rerun()
-    for i, hotel in enumerate(st.session_state.hotel_info):
-        if edit_info_mode:
-            with st.expander(f"編輯: {hotel['name']}", expanded=True):
-                hotel['name'] = st.text_input("飯店名稱", hotel['name'], key=f"hn_{hotel['id']}")
-                hotel['range'] = st.text_input("天數", hotel['range'], key=f"hr_{hotel['id']}")
-                hotel['date'] = st.text_input("日期", hotel['date'], key=f"hd_{hotel['id']}")
-                hotel['addr'] = st.text_input("地址", hotel['addr'], key=f"ha_{hotel['id']}")
-                hotel['link'] = st.text_input("連結", hotel['link'], key=f"hl_{hotel['id']}")
-                if st.button("🗑️ 刪除", key=f"del_h_{hotel['id']}"):
-                    st.session_state.hotel_info.pop(i)
-                    st.rerun()
-        map_url = f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(hotel['addr'] or hotel['name'])}"
-        st.markdown(f"""<div class="hotel-card"><div class="hotel-img-placeholder">🏨</div><div class="hotel-body"><div class="hotel-name">{hotel['name']}</div><div class="hotel-meta"><span class="hotel-badge">{hotel['range']}</span><span>{hotel['date']}</span></div><div class="hotel-meta" style="margin-top:8px;">📍 {hotel['addr']}</div><div style="margin-top:10px;"><a href="{map_url}" target="_blank" style="text-decoration:none; color:{c_primary}; font-weight:bold;">🗺️ 查看地圖</a></div></div></div>""", unsafe_allow_html=True)
+    for hotel in st.session_state.hotel_info:
+        st.markdown(f"""
+        <div class="hotel-card">
+            <div class="hotel-img-placeholder">🏨</div>
+            <div class="hotel-body">
+                <div class="hotel-name">{hotel['name']}</div>
+                <div class="hotel-meta">
+                    <span class="hotel-badge">{hotel['range']}</span>
+                    <span>{hotel['date']}</span>
+                </div>
+                <div class="hotel-meta" style="margin-top:8px;">📍 {hotel['addr']}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ==========================================
 # 6. 工具
 # ==========================================
 with tab6:
     st.header("🧰 實用工具")
+    
+    st.subheader("💴 匯率計算")
+    col_calc1, col_calc2 = st.columns(2)
+    amt = col_calc1.number_input("外幣", value=1000, step=100)
+    twd = int(amt * st.session_state.exchange_rate)
+    
+    st.markdown(f"""
+    <div class="widget-card">
+        <div class="widget-label">約合台幣</div>
+        <div class="widget-value">NT$ {twd:,}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if amt > 0:
+        tax_free = int(amt / 1.1)
+        refund = amt - tax_free
+        st.caption(f"🛍️ 免稅價約: {tax_free:,} | 退稅額約: {refund:,}")
+
+    st.divider()
+    
+    st.subheader("🛍️ 購物清單")
+    edited_df = st.data_editor(st.session_state.shopping_list, num_rows="dynamic", key="shop_edit", use_container_width=True)
+    if not edited_df.equals(st.session_state.shopping_list):
+        st.session_state.shopping_list = edited_df
+        st.rerun()
+
+    st.divider()
+    
+    st.subheader("🆘 緊急求助")
+    target_country_sos = st.session_state.target_country
+    sos_map = {
+        "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
+        "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
+        "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
+    }
+    
+    if target_country_sos in sos_map:
+        s_type = st.selectbox("選擇緊急狀況", list(sos_map[target_country_sos].keys()))
+        s_txt = sos_map[target_country_sos][s_type]
+        st.markdown(f"""
+        <div class="sos-card">
+            <div class="sos-sub">請向當地人出示此畫面</div>
+            <div class="sos-title">{s_txt}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.info("目前僅支援 日/韓/泰")
+        
+    st.divider()
     
     st.subheader("☁️ 雲端同步")
     c1, c2 = st.columns(2)
@@ -739,44 +794,12 @@ with tab6:
                 st.rerun()
         else: st.error("缺少雲端套件")
 
-    st.divider()
-    st.subheader("💴 匯率")
-    amt = st.number_input("外幣", step=100)
-    st.metric("台幣", int(amt * st.session_state.exchange_rate))
-    
-    st.divider()
-    st.subheader("🛍️ 購物")
-    edited_df = st.data_editor(st.session_state.shopping_list, num_rows="dynamic", key="shop_edit")
-    if not edited_df.equals(st.session_state.shopping_list):
-        st.session_state.shopping_list = edited_df
-        st.rerun()
-    
-    st.divider()
-    st.subheader("🆘 緊急")
-    target_country_sos = st.session_state.target_country
-    sos_map = {
-        "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
-        "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
-        "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
-    }
-    if target_country_sos in sos_map:
-        s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
-        s_txt = sos_map[target_country_sos][s_type]
-        st.markdown(f"<div class='sos-card'><div class='sos-title'>{s_txt}</div></div>", unsafe_allow_html=True)
-    
-    st.divider()
-    st.subheader("🗣️ 會話")
-    if target_country_sos in SURVIVAL_PHRASES:
-        phrases = SURVIVAL_PHRASES[target_country_sos]
-        cat = st.selectbox("情境", list(phrases.keys()))
-        for p in phrases[cat]:
-            st.markdown(f"<div class='apple-card' style='padding:10px; margin-bottom:5px;'>{p[0]}<br><b>{p[1]}</b></div>", unsafe_allow_html=True)
-
 # ==========================================
 # 7. AI 導遊
 # ==========================================
 with tab7:
     st.header("🤖 AI 隨身導遊")
+    
     if "trigger_ai" not in st.session_state: st.session_state.trigger_ai = False
     if "trigger_query" not in st.session_state: st.session_state.trigger_query = ""
 
@@ -786,7 +809,8 @@ with tab7:
         st.rerun()
 
     for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]): st.write(msg["content"])
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
             
     if st.session_state.trigger_ai:
         prompt = st.session_state.trigger_query
