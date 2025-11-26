@@ -8,7 +8,7 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 ---
+# --- 嘗試匯入進階套件 (雲端 & 地圖) ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -87,49 +87,34 @@ def analyze_receipt_image(image_file):
         如果無法辨識，price 請回傳 0。
         """
 
-        # 5. 【關鍵修改】自動尋找可用模型
-        # 先嘗試取得所有支援 'generateContent' 的模型列表
+        # 5. 自動尋找可用模型 (優先使用 2.0 Flash)
         available_models = []
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
-        except Exception as e:
-            st.error(f"無法列出模型清單: {e}")
+        except:
+            pass
 
-     # 定義我們想嘗試的模型順序 (根據您的截圖調整)
+        # 定義優先順序
         priority_models = [
-            'models/gemini-2.0-flash',          # 首選：最新、最快
-            'models/gemini-2.0-flash-exp',      # 備選：實驗版
-            'models/gemini-1.5-flash',          # 備選：穩定版
+            'models/gemini-2.0-flash',
+            'models/gemini-2.0-flash-exp',
+            'models/gemini-1.5-flash',
             'models/gemini-1.5-flash-latest',
             'models/gemini-1.5-pro',
             'models/gemini-pro-vision'
         ]
 
-        # 挑選一個存在的模型
-        target_model_name = None
+        target_model_name = 'models/gemini-1.5-flash' # 預設備案
         for candidate in priority_models:
             if candidate in available_models:
                 target_model_name = candidate
                 break
         
-        # 如果清單對不上，就強行試試看第一個
-        if not target_model_name:
-            target_model_name = 'gemini-1.5-flash'
-
         # 6. 開始生成
-        try:
-            model = genai.GenerativeModel(target_model_name)
-            response = model.generate_content([prompt, img])
-        except Exception as e:
-            # 如果失敗，顯示詳細錯誤並列出可用模型幫助除錯
-            st.error(f"模型 {target_model_name} 調用失敗。")
-            with st.expander("查看除錯資訊 (API Key 權限)"):
-                st.write(f"錯誤訊息: {e}")
-                st.write("您的 API Key 目前可用的模型清單：")
-                st.write(available_models)
-            return {"item": "API 錯誤", "price": 0}
+        model = genai.GenerativeModel(target_model_name)
+        response = model.generate_content([prompt, img])
         
         # 7. 解析回傳結果
         text = response.text.strip()
@@ -140,14 +125,14 @@ def analyze_receipt_image(image_file):
         return data
 
     except Exception as e:
-        st.error(f"系統錯誤: {e}")
-        return {"item": "分析失敗", "price": 0}
+        return {"item": f"分析失敗", "price": 0}
+
 # --- 地理編碼 ---
 @st.cache_data
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_v9_gemini")
+        geolocator = Nominatim(user_agent="trip_planner_app_final_v10")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -561,20 +546,29 @@ with tab1:
                 input_method = st.radio("輸入方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"in_method_{item['id']}")
                 uploaded_receipt = None
                 
+                # 相機開關
                 if input_method == "📸 拍照":
-                    uploaded_receipt = st.camera_input("拍照", key=f"cam_{item['id']}", label_visibility="collapsed")
+                    if st.toggle("🔴 啟動相機", key=f"toggle_cam_{item['id']}"):
+                        uploaded_receipt = st.camera_input("拍照", key=f"cam_{item['id']}", label_visibility="collapsed")
                 else:
                     uploaded_receipt = st.file_uploader("上傳", type=["jpg","png"], key=f"upl_{item['id']}", label_visibility="collapsed")
 
+                # 自動填入邏輯
                 if uploaded_receipt:
-                    with st.spinner("正在分析..."):
-                        # 這裡呼叫 AI 函數
+                    with st.spinner("正在分析收據..."):
                         result = analyze_receipt_image(uploaded_receipt)
                     
                     st.success(f"已辨識：{result['item']} ¥{result['price']}")
-                    if f"new_exp_n_{item['id']}" not in st.session_state:
-                        st.session_state[f"new_exp_n_{item['id']}"] = result['item']
-                        st.session_state[f"new_exp_p_{item['id']}"] = result['price']
+                    
+                    # 寫入 session_state
+                    name_key = f"new_exp_n_{item['id']}"
+                    price_key = f"new_exp_p_{item['id']}"
+                    
+                    # 只有當欄位是空的，或者我們想強制覆蓋時才寫入
+                    # 這裡我們直接寫入，並透過 rerun 更新 UI
+                    st.session_state[name_key] = result['item']
+                    st.session_state[price_key] = result['price']
+                    st.rerun()
                 
                 cx1, cx2, cx3 = st.columns([2, 1, 1])
                 cx1.text_input("項目", key=f"new_exp_n_{item['id']}", placeholder="項目", label_visibility="collapsed")
