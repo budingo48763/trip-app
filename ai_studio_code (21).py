@@ -8,7 +8,7 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 (雲端 & 地圖) ---
+# --- 嘗試匯入進階套件 ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -18,6 +18,7 @@ except ImportError:
 
 try:
     import folium
+    from folium import plugins
     from streamlit_folium import st_folium
     from geopy.geocoders import Nominatim
     MAP_AVAILABLE = True
@@ -60,54 +61,34 @@ THEMES = {
 # --- 收據分析 (翻譯 + 排除雜訊版) ---
 def analyze_receipt_image(image_file):
     """使用 Google Gemini 分析收據，包含翻譯與排除非商品項目"""
-    
-    # 1. 基本檢查
     if not GEMINI_AVAILABLE:
-        return [
-            {"name": "おにぎり (飯糰) - 模擬", "price": 130},
-            {"name": "コーラ (可樂) - 模擬", "price": 140}
-        ]
+        return [{"name": "飯糰 (模擬)", "price": 130}, {"name": "可樂 (模擬)", "price": 140}]
     
     if "GEMINI_API_KEY" not in st.secrets:
         return [{"name": "請設定 API Key", "price": 0}]
 
     try:
-        # 2. 設定 API
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # 3. 處理圖片
         img = Image.open(image_file)
         
-        # 4. 定義提示詞 (關鍵修改：加入翻譯與排除規則)
         prompt = """
         你是一個專業的旅遊記帳助手。請分析這張收據圖片，列出實際購買的商品明細。
-
         請嚴格遵守以下規則：
-        1. 【翻譯】：將商品名稱翻譯成「繁體中文」，格式為：「原文 (中文翻譯)」。例如："手巻おにぎり (手卷飯糰)"。
+        1. 【翻譯】：將商品名稱翻譯成「繁體中文」，格式為：「原文 (中文翻譯)」。
         2. 【金額】：提取該項目的單價或總價（Integer）。
-        3. 【排除】：絕對不要包含「小計」、「消費稅」、「合計」、「現計」、「釣錢(找零)」、「対象(對象)」、「還元(回饋)」等統計欄位。只列出具體的商品。
+        3. 【排除】：絕對不要包含「小計」、「消費稅」、「合計」、「現計」、「釣錢(找零)」等統計欄位。
         4. 【格式】：直接回傳一個 JSON Array，不要有 Markdown 標記。
-           範例：[{"name": "コカコーラ (可口可樂)", "price": 140}, {"name": "レジ袋 (塑膠袋)", "price": 3}]
+           範例：[{"name": "コカコーラ (可口可樂)", "price": 140}]
         """
 
-        # 5. 自動尋找可用模型
+        # 定義優先順序
+        priority_models = ['models/gemini-2.0-flash', 'models/gemini-1.5-flash']
         available_models = []
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
-        except:
-            pass
-
-        # 定義優先順序 (優先用 2.0 Flash)
-        priority_models = [
-            'models/gemini-2.0-flash',
-            'models/gemini-2.0-flash-exp',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-pro',
-            'models/gemini-pro-vision'
-        ]
+        except: pass
 
         target_model_name = 'models/gemini-1.5-flash'
         for candidate in priority_models:
@@ -115,19 +96,14 @@ def analyze_receipt_image(image_file):
                 target_model_name = candidate
                 break
         
-        # 6. 開始生成
         model = genai.GenerativeModel(target_model_name)
         response = model.generate_content([prompt, img])
-        
-        # 7. 解析回傳結果
         text = response.text.strip()
         if text.startswith("```"):
             text = text.replace("```json", "").replace("```", "")
         
         data = json.loads(text)
-        
-        if isinstance(data, dict):
-            return [data]
+        if isinstance(data, dict): return [data]
         return data
 
     except Exception as e:
@@ -138,7 +114,7 @@ def analyze_receipt_image(image_file):
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_final_v12")
+        geolocator = Nominatim(user_agent="trip_planner_v13")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -526,20 +502,19 @@ with tab1:
         clean_note = item["note"].replace('\n', '<br>')
         note_div = f'<div style="font-size:0.85rem; color:{c_sub}; background:{c_bg}; padding:8px; border-radius:8px; margin-top:8px; line-height:1.4;">📝 {clean_note}</div>' if item['note'] and not is_edit_mode else ""
         
-        # 記帳
-        expense_details_html = ""
-        if item.get('expenses'):
-            rows = ""
-            for exp in item['expenses']:
-                 rows += f"<div style='display:flex; justify-content:space-between; font-size:0.8rem; color:#888; margin-top:2px;'><span>{exp['name']}</span><span>¥{exp['price']:,}</span></div>"
-            expense_details_html = f"<div style='margin-top:8px; padding-top:5px; border-top:1px dashed {c_sec}; opacity:0.8;'>{rows}</div>"
-
         # 行程卡片 HTML
-        card_html = f"""<div style="display:flex; gap:15px; margin-bottom:0px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="font-weight:700; color:{c_text}; font-size:1.1rem;">{item['time']}</div><div style="flex-grow:1; width:2px; background:{c_sec}; margin:5px 0; opacity:0.3; border-radius:2px;"></div></div><div style="flex-grow:1;"><div class="apple-card" style="margin-bottom:0px;"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div class="apple-title" style="margin-top:0;">{item['title']}</div>{cost_display}</div><div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>{note_div}{expense_details_html}</div></div></div>"""
+        card_html = f"""<div style="display:flex; gap:15px; margin-bottom:0px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="font-weight:700; color:{c_text}; font-size:1.1rem;">{item['time']}</div><div style="flex-grow:1; width:2px; background:{c_sec}; margin:5px 0; opacity:0.3; border-radius:2px;"></div></div><div style="flex-grow:1;"><div class="apple-card" style="margin-bottom:0px;"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div class="apple-title" style="margin-top:0;">{item['title']}</div>{cost_display}</div><div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>{note_div}</div></div></div>"""
         st.markdown(card_html, unsafe_allow_html=True)
 
+        # 明細折疊區 (可隱藏)
+        if item.get('expenses'):
+            with st.expander(f"🧾 查看消費明細 (合計 ¥{final_cost:,})", expanded=False):
+                for exp in item['expenses']:
+                    st.markdown(f"**{exp['name']}** : ¥{exp['price']:,}")
+
         if is_edit_mode:
-            with st.container(border=True):
+            # 這裡將「記帳與掃描」收納進 expander
+            with st.expander("💰 記帳與收據掃描 (點擊展開)", expanded=False):
                 c1, c2 = st.columns([2, 1])
                 item['title'] = c1.text_input("名稱", item['title'], key=f"t_{item['id']}")
                 item['time'] = c2.time_input("時間", datetime.strptime(item['time'], "%H:%M").time(), key=f"tm_{item['id']}").strftime("%H:%M")
@@ -547,7 +522,8 @@ with tab1:
                 item['cost'] = st.number_input("預算 (¥)", value=item['cost'], step=100, key=f"c_{item['id']}")
                 item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
                 
-                st.markdown("**💰 記帳 / 掃描**")
+                st.markdown("---")
+                
                 # 輸入方式切換
                 input_method = st.radio("輸入方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"in_method_{item['id']}")
                 uploaded_receipt = None
@@ -572,15 +548,14 @@ with tab1:
                         for res in results:
                             n = res.get('name', '未知商品')
                             p = res.get('price', 0)
-                            if p > 0: # 只加入有金額的項目
+                            if p > 0:
                                 item['expenses'].append({'name': n, 'price': p})
                                 total_p += p
                                 count += 1
                         
                         if count > 0:
-                            # 更新總金額
                             item['cost'] = sum(x['price'] for x in item['expenses'])
-                            st.success(f"已自動加入 {count} 筆明細 (總計 ¥{total_p})")
+                            st.success(f"已自動加入 {count} 筆明細")
                             st.session_state[scan_flag_key] = True
                             time.sleep(1)
                             st.rerun()
@@ -599,13 +574,13 @@ with tab1:
                 cx3.button("➕", key=f"add_{item['id']}", on_click=add_expense_callback, args=(item['id'], selected_day_num))
                 
                 if item.get('expenses'):
-                    with st.expander("管理細項"):
-                         for i_ex, ex in enumerate(item['expenses']):
-                             c_d1, c_d2 = st.columns([3,1])
-                             c_d1.text(f"{ex['name']} ¥{ex['price']}")
-                             if c_d2.button("刪", key=f"del_exp_{item['id']}_{i_ex}"):
-                                 item['expenses'].pop(i_ex)
-                                 st.rerun()
+                    st.write("已記錄項目：")
+                    for i_ex, ex in enumerate(item['expenses']):
+                        c_d1, c_d2 = st.columns([3,1])
+                        c_d1.text(f"{ex['name']} ¥{ex['price']}")
+                        if c_d2.button("刪", key=f"del_exp_{item['id']}_{i_ex}"):
+                            item['expenses'].pop(i_ex)
+                            st.rerun()
 
                 if st.button("🗑️ 刪除行程", key=f"del_{item['id']}"):
                     st.session_state.trip_data[selected_day_num].pop(index)
@@ -628,7 +603,7 @@ with tab1:
                  st.markdown(trans_html, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 地圖軌跡
+# 2. 地圖軌跡 (回歸路線圖)
 # ==========================================
 with tab2:
     st.subheader(f"🗺️ Day {selected_day_num} 路線圖")
@@ -645,14 +620,28 @@ with tab2:
             
             m = folium.Map(location=start_coords, zoom_start=13)
             route_coords = []
+            
             for idx, item in enumerate(valid_map_items):
                 coords = get_lat_lon(item['loc'])
                 if coords:
                     route_coords.append(coords)
-                    folium.Marker(coords, popup=item['title'], icon=folium.Icon(color='red', icon=str(idx+1), prefix='fa')).add_to(m)
+                    # 使用數字標記 (1, 2, 3...)
+                    plugins.BeautifyIcon(
+                        number=idx + 1,
+                        border_color="#007AFF",
+                        text_color="#007AFF",
+                        icon_shape="marker"
+                    ).add_to(folium.Marker(coords, popup=item['title']).add_to(m))
             
+            # 畫出藍色路線
             if len(route_coords) > 1:
-                folium.PolyLine(route_coords, color="#007AFF", weight=5, opacity=0.8).add_to(m)
+                folium.PolyLine(
+                    route_coords,
+                    color="#007AFF",
+                    weight=5,
+                    opacity=0.8,
+                    tooltip="行程路線"
+                ).add_to(m)
             
             st_folium(m, width="100%", height=400)
         else:
