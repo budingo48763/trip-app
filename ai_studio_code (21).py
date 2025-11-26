@@ -6,8 +6,9 @@ import math
 import pandas as pd
 import random
 import json
+import base64
 
-# --- 嘗試匯入進階套件 (雲端 & 地圖) ---
+# --- 嘗試匯入進階套件 ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -22,6 +23,14 @@ try:
     MAP_AVAILABLE = True
 except ImportError:
     MAP_AVAILABLE = False
+
+# --- Google Gemini 套件 ---
+try:
+    import google.generativeai as genai
+    from PIL import Image
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 # -------------------------------------
 # 1. 系統設定 & 主題定義
@@ -48,12 +57,61 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
+# --- 收據分析 (Gemini 1.5 Flash) ---
+def analyze_receipt_image(image_file):
+    """使用 Google Gemini 1.5 Flash 真實分析收據"""
+    
+    # 1. 檢查是否有 API Key 和套件
+    if not GEMINI_AVAILABLE:
+        return {"item": "套件未安裝 (模擬)", "price": 1000}
+    
+    if "GEMINI_API_KEY" not in st.secrets:
+        return {"item": "請設定 Secrets (模擬)", "price": 2000}
+
+    try:
+        # 2. 設定 API
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        # 3. 載入模型 (使用 Flash 版本，速度快且免費額度高)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # 4. 處理圖片
+        img = Image.open(image_file)
+        
+        # 5. 發送請求
+        prompt = """
+        你是一個旅遊記帳助手。請分析這張收據圖片。
+        請提取以下資訊：
+        1. 主要的店名或商品類別 (例如：7-11, 拉麵, 藥妝店)。
+        2. 總金額 (Total Price)，只提取數字。
+        
+        請直接回傳 JSON 格式，不要有 markdown 標記。
+        格式範例： {"item": "一蘭拉麵", "price": 1280}
+        如果無法辨識，price 請回傳 0。
+        """
+        
+        response = model.generate_content([prompt, img])
+        
+        # 6. 解析回傳結果
+        text = response.text.strip()
+        # 移除可能存在的 markdown 標記 (```json ... ```)
+        if text.startswith("```"):
+            text = text.replace("```json", "").replace("```", "")
+        
+        data = json.loads(text)
+        return data
+
+    except Exception as e:
+        st.error(f"AI 分析失敗: {e}")
+        # 發生錯誤時回傳預設值，避免程式崩潰
+        return {"item": "分析失敗", "price": 0}
+
 # --- 地理編碼 ---
 @st.cache_data
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_v7_final")
+        geolocator = Nominatim(user_agent="trip_planner_app_v9_gemini")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -272,7 +330,7 @@ SURVIVAL_PHRASES = {
 # -------------------------------------
 # 4. CSS 樣式
 # -------------------------------------
-# 定義顏色變數，供 CSS 與 HTML 使用
+# 使用變數存 CSS
 c_bg = current_theme['bg']
 c_text = current_theme['text']
 c_card = current_theme['card']
@@ -280,86 +338,84 @@ c_primary = current_theme['primary']
 c_sub = current_theme['sub']
 c_sec = current_theme['secondary']
 
-# 使用一般字串拼接 CSS，避免 f-string 語法問題
-main_css = """
+main_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
 
-.stApp { 
-    background-color: %s !important;
-    color: %s !important; 
+.stApp {{ 
+    background-color: {c_bg} !important;
+    color: {c_text} !important; 
     font-family: 'Inter', 'Noto Serif JP', sans-serif !important;
-}
+}}
 
-[data-testid="stSidebarCollapsedControl"], footer { display: none !important; }
-header[data-testid="stHeader"] { height: 0 !important; background: transparent !important; }
+[data-testid="stSidebarCollapsedControl"], footer {{ display: none !important; }}
+header[data-testid="stHeader"] {{ height: 0 !important; background: transparent !important; }}
 
 /* Apple Style Cards */
-.apple-card {
+.apple-card {{
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
     border-radius: 18px; padding: 18px; margin-bottom: 0px;
     border: 1px solid rgba(255, 255, 255, 0.6);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
-}
-.apple-time { font-weight: 700; font-size: 1.1rem; color: %s; }
-.apple-loc { font-size: 0.9rem; color: %s; display:flex; align-items:center; gap:5px; margin-top:5px; }
+}}
+.apple-time {{ font-weight: 700; font-size: 1.1rem; color: {c_text}; }}
+.apple-loc {{ font-size: 0.9rem; color: {c_sub}; display:flex; align-items:center; gap:5px; margin-top:5px; }}
 
 /* Weather Widget */
-.apple-weather-widget {
-    background: linear-gradient(135deg, %s 0%%, %s 150%%);
+.apple-weather-widget {{
+    background: linear-gradient(135deg, {c_primary} 0%, {c_text} 150%);
     color: white; padding: 15px 20px; border-radius: 20px;
     margin-bottom: 25px; box-shadow: 0 8px 20px rgba(0,0,0,0.15);
     display: flex; align-items: center; justify-content: space-between;
-}
+}}
 
 /* Transport Card */
-.trans-card {
+.trans-card {{
     background: #FFFFFF; border-radius: 12px; padding: 10px 15px;
     margin: 10px 0 10px 50px; border: 1px solid #E0E0E0;
     display: flex; align-items: center; justify-content: space-between;
     box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-}
-.trans-tag {
+}}
+.trans-tag {{
     font-size: 0.75rem; padding: 3px 8px; border-radius: 6px;
     background: #F0F4F8; color: #486581; font-weight: bold;
-}
+}}
 
 /* Day Segmented Control */
-div[data-testid="stRadio"] > div {
-    background-color: %s !important;
+div[data-testid="stRadio"] > div {{
+    background-color: {c_sec} !important;
     padding: 4px !important; border-radius: 12px !important; gap: 0px !important; border: none !important;
     overflow-x: auto; flex-wrap: nowrap;
-}
-div[data-testid="stRadio"] label {
+}}
+div[data-testid="stRadio"] label {{
     background-color: transparent !important; border: none !important;
     flex: 1 !important; text-align: center !important; justify-content: center !important;
     border-radius: 9px !important; height: auto !important; min-width: 50px !important;
-}
-div[data-testid="stRadio"] label[data-checked="true"] {
-    background-color: %s !important;
-    color: %s !important;
+}}
+div[data-testid="stRadio"] label[data-checked="true"] {{
+    background-color: {c_card} !important;
+    color: {c_text} !important;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important; font-weight: bold !important;
-}
+}}
 
 /* Info Cards */
-.info-card {
-    background-color: %s; border-radius: 12px; padding: 20px; margin-bottom: 15px;
+.info-card {{
+    background-color: {c_card}; border-radius: 12px; padding: 20px; margin-bottom: 15px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0;
-}
-.info-tag { background: %s; color: %s; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
+}}
+.info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
 
 /* Map Route Animation */
-.map-tl-container { position: relative; max-width: 100%%; margin: 20px auto; padding-left: 30px; }
-.map-tl-item { position: relative; margin-bottom: 25px; }
+.map-tl-container {{ position: relative; max-width: 100%; margin: 20px auto; padding-left: 30px; }}
+.map-tl-item {{ position: relative; margin-bottom: 25px; }}
 
 /* UI Tweaks */
-button[data-baseweb="tab"] { border-radius: 20px !important; margin-right:5px !important; }
-div[data-baseweb="input"], div[data-baseweb="base-input"] { border: none !important; border-bottom: 1px solid %s !important; background: transparent !important; }
-input { color: %s !important; }
+button[data-baseweb="tab"] {{ border-radius: 20px !important; margin-right:5px !important; }}
+div[data-baseweb="input"], div[data-baseweb="base-input"] {{ border: none !important; border-bottom: 1px solid {c_sec} !important; background: transparent !important; }}
+input {{ color: {c_text} !important; }}
 </style>
-""" % (c_bg, c_text, c_text, c_sub, c_primary, c_text, c_sec, c_card, c_text, c_card, c_bg, c_sub, c_sec, c_text)
-
+"""
 st.markdown(main_css, unsafe_allow_html=True)
 
 # -------------------------------------
@@ -417,23 +473,8 @@ with tab1:
     first_loc = current_items[0]['loc'] if current_items and current_items[0]['loc'] else (st.session_state.target_country if st.session_state.target_country != "日本" else "京都")
     weather = WeatherService.get_forecast(first_loc, current_date)
     
-    # HTML Construction (Split into variables)
-    weather_html = f"""
-    <div class="apple-weather-widget">
-        <div style="display:flex; align-items:center; gap:15px;">
-            <div style="font-size:2.5rem;">{weather['icon']}</div>
-            <div>
-                <div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div>
-                <div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div>
-            </div>
-        </div>
-        <div style="text-align:right;">
-            <div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div>
-            <div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div>
-            <div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div>
-        </div>
-    </div>
-    """
+    # HTML 壓縮單行
+    weather_html = f"""<div class="apple-weather-widget"><div style="display:flex; align-items:center; gap:15px;"><div style="font-size:2.5rem;">{weather['icon']}</div><div><div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div><div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div></div></div><div style="text-align:right;"><div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div><div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div><div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div></div></div>"""
     st.markdown(weather_html, unsafe_allow_html=True)
 
     is_edit_mode = st.toggle("編輯模式 (含收據掃描)")
@@ -466,7 +507,7 @@ with tab1:
                  rows += f"<div style='display:flex; justify-content:space-between; font-size:0.8rem; color:#888; margin-top:2px;'><span>{exp['name']}</span><span>¥{exp['price']:,}</span></div>"
             expense_details_html = f"<div style='margin-top:8px; padding-top:5px; border-top:1px dashed {c_sec}; opacity:0.8;'>{rows}</div>"
 
-        # 行程卡片 HTML (單行拼接)
+        # 行程卡片 HTML
         card_html = f"""<div style="display:flex; gap:15px; margin-bottom:0px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="font-weight:700; color:{c_text}; font-size:1.1rem;">{item['time']}</div><div style="flex-grow:1; width:2px; background:{c_sec}; margin:5px 0; opacity:0.3; border-radius:2px;"></div></div><div style="flex-grow:1;"><div class="apple-card" style="margin-bottom:0px;"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div class="apple-title" style="margin-top:0;">{item['title']}</div>{cost_display}</div><div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>{note_div}{expense_details_html}</div></div></div>"""
         st.markdown(card_html, unsafe_allow_html=True)
 
@@ -480,14 +521,24 @@ with tab1:
                 item['note'] = st.text_area("備註", item['note'], key=f"n_{item['id']}")
                 
                 st.markdown("**💰 記帳 / 掃描**")
-                scan_col, manual_col = st.columns([1, 2])
-                with scan_col:
-                    uploaded_receipt = st.file_uploader("📷", type=["jpg","png"], key=f"scan_{item['id']}", label_visibility="collapsed")
-                    if uploaded_receipt:
-                        st.caption("模擬辨識: 午餐 1280")
-                        if f"new_exp_n_{item['id']}" not in st.session_state:
-                            st.session_state[f"new_exp_n_{item['id']}"] = "午餐定食 (掃描)"
-                            st.session_state[f"new_exp_p_{item['id']}"] = 1280
+                # 輸入方式切換
+                input_method = st.radio("輸入方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"in_method_{item['id']}")
+                uploaded_receipt = None
+                
+                if input_method == "📸 拍照":
+                    uploaded_receipt = st.camera_input("拍照", key=f"cam_{item['id']}", label_visibility="collapsed")
+                else:
+                    uploaded_receipt = st.file_uploader("上傳", type=["jpg","png"], key=f"upl_{item['id']}", label_visibility="collapsed")
+
+                if uploaded_receipt:
+                    with st.spinner("正在分析..."):
+                        # 這裡呼叫 AI 函數
+                        result = analyze_receipt_image(uploaded_receipt)
+                    
+                    st.success(f"已辨識：{result['item']} ¥{result['price']}")
+                    if f"new_exp_n_{item['id']}" not in st.session_state:
+                        st.session_state[f"new_exp_n_{item['id']}"] = result['item']
+                        st.session_state[f"new_exp_p_{item['id']}"] = result['price']
                 
                 cx1, cx2, cx3 = st.columns([2, 1, 1])
                 cx1.text_input("項目", key=f"new_exp_n_{item['id']}", placeholder="項目", label_visibility="collapsed")
@@ -519,6 +570,7 @@ with tab1:
                  item['trans_mode'] = ct1.selectbox("交通", TRANSPORT_OPTIONS, key=f"trm_{item['id']}")
                  item['trans_min'] = ct2.number_input("分", value=t_min, step=5, key=f"trmin_{item['id']}")
             else:
+                 # 壓縮為單行 HTML
                  trans_html = f"""<div style="display:flex; gap:15px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="flex-grow:1; width:2px; border-left:2px dashed {c_sec}; margin:0; opacity:0.6;"></div></div><div style="flex-grow:1; padding:5px 0;"><div class="trans-card"><div style="display:flex; flex-direction:column;"><div style="font-size:0.7rem; color:#888; margin-bottom:2px;">推薦路線 (RECOMMENDED)</div><div style="display:flex; align-items:center; gap:8px;"><div style="font-weight:bold; font-size:0.9rem;">{t_mode}</div><div class="trans-tag">最快速</div></div></div><div style="text-align:right;"><div style="font-weight:bold; font-size:0.9rem;">{t_min} min</div><a href="{nav_link}" target="_blank" style="text-decoration:none; font-size:0.75rem; color:#007AFF;">➤ 導航</a></div></div></div></div>"""
                  st.markdown(trans_html, unsafe_allow_html=True)
 
