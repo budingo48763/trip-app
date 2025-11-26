@@ -87,7 +87,7 @@ def analyze_receipt_image(image_file):
         如果無法辨識，price 請回傳 0。
         """
 
-        # 5. 自動尋找可用模型 (優先使用 2.0 Flash)
+        # 5. 自動尋找可用模型
         available_models = []
         try:
             for m in genai.list_models():
@@ -132,7 +132,7 @@ def analyze_receipt_image(image_file):
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_final_v10")
+        geolocator = Nominatim(user_agent="trip_planner_app_final_v11")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -207,16 +207,23 @@ def get_packing_recommendations(trip_data, start_date):
 def add_expense_callback(item_id, day_num):
     name_key = f"new_exp_n_{item_id}"
     price_key = f"new_exp_p_{item_id}"
+    flag_key = f"scan_done_{item_id}"
+    
     name = st.session_state.get(name_key, "")
     price = st.session_state.get(price_key, 0)
+    
     if name and price > 0:
         target_item = next((x for x in st.session_state.trip_data[day_num] if x['id'] == item_id), None)
         if target_item:
             if "expenses" not in target_item: target_item["expenses"] = []
             target_item['expenses'].append({"name": name, "price": price})
             target_item['cost'] = sum(x['price'] for x in target_item['expenses'])
+            
+            # 清空輸入與重置掃描狀態
             st.session_state[name_key] = ""
             st.session_state[price_key] = 0
+            if flag_key in st.session_state:
+                st.session_state[flag_key] = False # 重置標記，允許下一次掃描
 
 def get_single_map_link(location):
     if not location: return "#"
@@ -553,23 +560,28 @@ with tab1:
                 else:
                     uploaded_receipt = st.file_uploader("上傳", type=["jpg","png"], key=f"upl_{item['id']}", label_visibility="collapsed")
 
-                # 自動填入邏輯
-                if uploaded_receipt:
+                # 自動填入邏輯 (加入 Flag 防止循環)
+                scan_flag_key = f"scan_done_{item['id']}"
+                
+                # 如果有上傳檔案，且還沒被標記為已處理
+                if uploaded_receipt and not st.session_state.get(scan_flag_key, False):
                     with st.spinner("正在分析收據..."):
                         result = analyze_receipt_image(uploaded_receipt)
                     
                     st.success(f"已辨識：{result['item']} ¥{result['price']}")
                     
                     # 寫入 session_state
-                    name_key = f"new_exp_n_{item['id']}"
-                    price_key = f"new_exp_p_{item['id']}"
+                    st.session_state[f"new_exp_n_{item['id']}"] = result['item']
+                    st.session_state[f"new_exp_p_{item['id']}"] = result['price']
                     
-                    # 只有當欄位是空的，或者我們想強制覆蓋時才寫入
-                    # 這裡我們直接寫入，並透過 rerun 更新 UI
-                    st.session_state[name_key] = result['item']
-                    st.session_state[price_key] = result['price']
+                    # 標記為已處理，避免無限重整
+                    st.session_state[scan_flag_key] = True
                     st.rerun()
                 
+                # 如果使用者取消了圖片 (uploaded_receipt 為 None)，重置 flag
+                if not uploaded_receipt and st.session_state.get(scan_flag_key, False):
+                    st.session_state[scan_flag_key] = False
+
                 cx1, cx2, cx3 = st.columns([2, 1, 1])
                 cx1.text_input("項目", key=f"new_exp_n_{item['id']}", placeholder="項目", label_visibility="collapsed")
                 cx2.number_input("金額", min_value=0, key=f"new_exp_p_{item['id']}", label_visibility="collapsed")
