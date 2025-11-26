@@ -48,13 +48,12 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 地理編碼 (新增：地址轉經緯度) ---
+# --- 地理編碼 ---
 @st.cache_data
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        # 使用 Nominatim (OpenStreetMap)
-        geolocator = Nominatim(user_agent="trip_planner_app_demo")
+        geolocator = Nominatim(user_agent="trip_planner_app_demo_v2")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -146,7 +145,6 @@ def get_single_map_link(location):
     return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(location)}"
 
 def generate_google_nav_link(origin, dest, mode="transit"):
-    """生成兩點間的 Google Maps 導航連結"""
     if not origin or not dest: return "#"
     base = "https://www.google.com/maps/dir/?api=1"
     return f"{base}&origin={urllib.parse.quote(origin)}&destination={urllib.parse.quote(dest)}&travelmode={mode}"
@@ -234,4 +232,96 @@ if "flight_info" not in st.session_state:
 
 if "hotel_info" not in st.session_state:
     st.session_state.hotel_info = [
-        {"id": 1,
+        {"id": 1, "name": "KOKO HOTEL 京都", "range": "D1-D3 (3泊)", "date": "1/17 - 1/19", "addr": "京都府京都市...", "link": ""},
+        {"id": 2, "name": "相鐵 FRESA INN 大阪", "range": "D4-D5 (2泊)", "date": "1/20 - 1/21", "addr": "大阪府大阪市...", "link": ""}
+    ]
+
+if "checklist" not in st.session_state:
+    st.session_state.checklist = {
+        "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
+        "電子產品": {"手機 & 充電線": False, "行動電源": False, "SIM卡 / Wifi機": False, "轉接頭": False},
+        "衣物穿搭": {"換洗衣物": False, "睡衣": False, "好走的鞋子": False, "外套": False},
+        "生活用品": {"牙刷牙膏": False, "常備藥": False, "塑膠袋": False, "折疊傘": False}
+    }
+
+TRANSPORT_OPTIONS = ["🚆 電車", "🚌 巴士", "🚶 步行", "🚕 計程車", "🚗 自駕", "🚢 船", "✈️ 飛機"]
+
+# 🌍 旅遊生存會話庫
+SURVIVAL_PHRASES = {
+    "日本": {
+        "招呼": [("你好", "こんにちは (Konnichiwa)"), ("謝謝", "ありがとう (Arigatou)"), ("不好意思", "すみません (Sumimasen)")],
+        "點餐": [("請給我這個", "これをください (Kore wo kudasai)"), ("買單", "お会計お願いします (Okaikei onegaishimasu)"), ("多少錢？", "いくらですか (Ikura desuka?)")],
+        "交通": [("...在哪裡？", "…はどこですか？ (... wa doko desuka?)"), ("車站", "駅 (Eki)"), ("廁所", "トイレ (Toire)")],
+        "購物": [("可以試穿嗎？", "試着してもいいですか (Shichaku shitemo ii desuka)"), ("有免稅嗎？", "免税できますか (Menzei dekimasuka)")],
+        "緊急": [("救命", "助けて (Tasukete)"), ("我身體不舒服", "具合が悪いです (Guai ga warui desu)"), ("我不見了", "迷子になりました (Maigo ni narimashita)")]
+    },
+    "韓國": {
+        "招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다"), ("不好意思", "저기요")],
+        "點餐": [("請給我這個", "이거 주세요"), ("買單", "계산해 주세요"), ("好", "네")],
+        "交通": [("...在哪裡？", "... 어디에요?"), ("車站", "역"), ("洗手間", "화장실")],
+        "購物": [("多少錢？", "얼마예요?"), ("可以打折嗎？", "깎아 주세요")],
+        "緊急": [("救命", "도와주세요"), ("痛", "아파요"), ("警察", "경찰")]
+    },
+    "泰國": {
+        "招呼": [("你好", "Sawasdee khrup/kha"), ("謝謝", "Khop khun khrup/kha")],
+        "點餐": [("我要這個", "Ao an nee"), ("多少錢", "Tao rai?"), ("不辣", "Mai pet")],
+        "交通": [("去...", "Bai ..."), ("廁所", "Hong nam"), ("機場", "Sanam bin")],
+        "購物": [("太貴了", "Paeng mak"), ("可以便宜點嗎", "Lot noi dai mai?")],
+        "緊急": [("救命", "Chuay duay"), ("醫生", "Mor"), ("去醫院", "Bai rong paya ban")]
+    }
+}
+
+# -------------------------------------
+# 4. CSS 樣式
+# -------------------------------------
+st.markdown(f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
+    
+    .stApp {{ 
+        background-color: {current_theme['bg']} !important;
+        color: {current_theme['text']} !important; 
+        font-family: 'Inter', 'Noto Serif JP', sans-serif !important;
+    }}
+
+    [data-testid="stSidebarCollapsedControl"], footer {{ display: none !important; }}
+    header[data-testid="stHeader"] {{ height: 0 !important; background: transparent !important; }}
+
+    /* Apple Style Cards */
+    .apple-card {{
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 18px; padding: 18px; margin-bottom: 0px;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+    }}
+    .apple-time {{ font-weight: 700; font-size: 1.1rem; color: {current_theme['text']}; }}
+    .apple-loc {{ font-size: 0.9rem; color: {current_theme['sub']}; display:flex; align-items:center; gap:5px; margin-top:5px; }}
+    
+    /* Weather Widget */
+    .apple-weather-widget {{
+        background: linear-gradient(135deg, {current_theme['primary']} 0%, {current_theme['text']} 150%);
+        color: white; padding: 15px 20px; border-radius: 20px;
+        margin-bottom: 25px; box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        display: flex; align-items: center; justify-content: space-between;
+    }}
+
+    /* Transport Card */
+    .trans-card {{
+        background: #FFFFFF; border-radius: 12px; padding: 10px 15px;
+        margin: 10px 0 10px 50px; border: 1px solid #E0E0E0;
+        display: flex; align-items: center; justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }}
+    .trans-tag {{
+        font-size: 0.75rem; padding: 3px 8px; border-radius: 6px;
+        background: #F0F4F8; color: #486581; font-weight: bold;
+    }}
+
+    /* Day Segmented Control */
+    div[data-testid="stRadio"] > div {{
+        background-color: {current_theme['secondary']} !important;
+        padding: 4px !important; border-radius: 12px !important; gap: 0px !important; border: none !important;
+        overflow-x: auto; flex-wrap: nowrap;
+    }}
+    div[data-
