@@ -2,36 +2,37 @@ import streamlit as st
 from datetime import datetime, timedelta
 import urllib.parse
 import time
+import math
 import pandas as pd
 import random
 import json
-from PIL import Image
+import base64
 
-# --- 套件匯入檢查 ---
-CLOUD_AVAILABLE = False
-MAP_AVAILABLE = False
-GEMINI_AVAILABLE = False
-
+# --- 嘗試匯入進階套件 ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     CLOUD_AVAILABLE = True
-except ImportError: pass
+except ImportError:
+    CLOUD_AVAILABLE = False
 
 try:
     import folium
     from streamlit_folium import st_folium
     from geopy.geocoders import Nominatim
     MAP_AVAILABLE = True
-except ImportError: pass
+except ImportError:
+    MAP_AVAILABLE = False
 
 try:
     import google.generativeai as genai
+    from PIL import Image
     GEMINI_AVAILABLE = True
-except ImportError: pass
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 # -------------------------------------
-# 1. 系統設定
+# 1. 系統設定 & 主題
 # -------------------------------------
 st.set_page_config(page_title="2026 旅程規劃 Pro", page_icon="✈️", layout="centered", initial_sidebar_state="collapsed")
 
@@ -43,43 +44,64 @@ THEMES = {
 }
 
 # -------------------------------------
-# 2. 核心函數
+# 2. 核心功能
 # -------------------------------------
+
+# --- 收據分析 ---
 def analyze_receipt_image(image_file):
-    if not GEMINI_AVAILABLE: return [{"name":"模擬商品","price":100}]
-    if "GEMINI_API_KEY" not in st.secrets: return [{"name":"請設API Key","price":0}]
+    if not GEMINI_AVAILABLE:
+        # 模擬多筆資料
+        return [{"name": "模擬-商品A", "price": 1200}, {"name": "模擬-商品B", "price": 800}]
+    
+    if "GEMINI_API_KEY" not in st.secrets:
+        return [{"name": "請設定 API Key", "price": 0}]
+
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         img = Image.open(image_file)
-        prompt = "分析收據，列出商品名稱與金額(整數)。翻譯成繁體中文。忽略小計稅金。回傳JSON Array:[{'name':'A','price':100}]。無Markdown。"
         
-        # 自動選模型
-        model_name = 'models/gemini-1.5-flash'
+        prompt = """
+        你是一個旅遊記帳助手。請分析這張收據。
+        1. 提取所有商品名稱與金額。
+        2. 翻譯成繁體中文。
+        3. 排除小計、稅金、找零。
+        4. 回傳 JSON Array: [{"name": "商品", "price": 100}, ...]
+        5. price 為整數。不要 Markdown。
+        """
+
+        # 嘗試多種模型
+        target_model = 'models/gemini-1.5-flash'
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    if 'gemini-2.0' in m.name: model_name = m.name; break
+                    if 'gemini-2.0' in m.name: target_model = m.name; break
         except: pass
-        
-        model = genai.GenerativeModel(model_name)
-        resp = model.generate_content([prompt, img])
-        txt = resp.text.strip().replace("```json", "").replace("```", "")
-        data = json.loads(txt)
-        return data if isinstance(data, list) else [data]
-    except: return [{"name":"分析失敗","price":0}]
 
+        model = genai.GenerativeModel(target_model)
+        response = model.generate_content([prompt, img])
+        text = response.text.strip().replace("```json", "").replace("```", "")
+        data = json.loads(text)
+        return data if isinstance(data, list) else [data]
+
+    except Exception:
+        return [{"name": "分析失敗", "price": 0}]
+
+# --- 地理編碼 ---
 @st.cache_data
-def get_lat_lon(name):
+def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        loc = Nominatim(user_agent="trip_app_v99").geocode(name)
-        return (loc.latitude, loc.longitude) if loc else None
+        geolocator = Nominatim(user_agent="trip_planner_final_fix_v2")
+        location = geolocator.geocode(location_name)
+        if location: return (location.latitude, location.longitude)
     except: return None
+    return None
 
-def get_cloud_client():
+# --- 雲端 ---
+def get_cloud_connection():
     if not CLOUD_AVAILABLE: return None
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         if "gcp_service_account" in st.secrets:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         else:
@@ -87,53 +109,79 @@ def get_cloud_client():
         return gspread.authorize(creds)
     except: return None
 
-def cloud_save(data):
-    c = get_cloud_client()
-    if c:
-        try: c.open("TripPlanDB").sheet1.update_cell(1, 1, json.dumps(data, default=str)); return True, "成功"
+def save_to_cloud(json_str):
+    client = get_cloud_connection()
+    if client:
+        try:
+            client.open("TripPlanDB").sheet1.update_cell(1, 1, json_str)
+            return True, "成功"
         except Exception as e: return False, str(e)
-    return False, "連線失敗"
+    return False, "失敗"
 
-def cloud_load():
-    c = get_cloud_client()
-    if c:
-        try: return c.open("TripPlanDB").sheet1.cell(1, 1).value
+def load_from_cloud():
+    client = get_cloud_connection()
+    if client:
+        try: return client.open("TripPlanDB").sheet1.cell(1, 1).value
         except: return None
     return None
 
-class Weather:
-    ICONS = {"Sunny":"☀️", "Cloudy":"☁️", "Rainy":"🌧️", "Snowy":"❄️"}
+class WeatherService:
+    ICONS = {"Sunny": "☀️", "Cloudy": "☁️", "Rainy": "🌧️", "Snowy": "❄️"}
     @staticmethod
-    def get(loc, date):
+    def get_forecast(loc, date):
         random.seed(f"{loc}{date}")
+        base = 20 if date.month not in [12,1,2] else 5
         cond = random.choice(["Sunny", "Cloudy", "Rainy"])
         desc = {"Sunny":"晴","Cloudy":"陰","Rainy":"雨","Snowy":"雪"}
-        return {"high":25, "low":18, "icon":Weather.ICONS[cond], "desc":desc[cond], "raw":cond}
+        return {"high":base+5, "low":base-3, "icon":WeatherService.ICONS[cond], "desc":desc[cond], "raw":cond}
 
 def get_packing(trip, start):
     recs = set()
     has_rain = False
     for day, items in trip.items():
-        w = Weather.get(items[0]['loc'] if items else "City", start + timedelta(days=day-1))
+        loc = items[0]['loc'] if items else "City"
+        w = WeatherService.get_forecast(loc, start + timedelta(days=day-1))
         if w['raw'] in ["Rainy","Snowy"]: has_rain = True
     if has_rain: recs.add("☔ 雨具")
     recs.add("🧢 防曬")
     return list(recs)
 
+def add_expense_callback(iid, d):
+    n = st.session_state.get(f"n_{iid}", "")
+    p = st.session_state.get(f"p_{iid}", 0)
+    if n and p > 0:
+        item = next((x for x in st.session_state.trip_data[d] if x['id'] == iid), None)
+        if item:
+            if "expenses" not in item: item["expenses"] = []
+            item['expenses'].append({"name": n, "price": p})
+            item['cost'] = sum(x['price'] for x in item['expenses'])
+            st.session_state[f"n_{iid}"] = ""
+            st.session_state[f"p_{iid}"] = 0
+
+def get_map_link(loc):
+    return loc if loc.startswith("http") else f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(loc)}"
+
+def get_nav_link(o, d):
+    return f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(o)}&destination={urllib.parse.quote(d)}&travelmode=transit"
+
+def get_route_link(items):
+    valid = [urllib.parse.quote(i['loc']) for i in items if i.get('loc')]
+    return f"https://www.google.com/maps/dir/{'/'.join(valid)}" if valid else "#"
+
 def process_excel(file):
     try:
         df = pd.read_excel(file)
-        new_data = {}
+        data = {}
         for _, row in df.iterrows():
             d = int(row['Day'])
-            if d not in new_data: new_data[d] = []
-            new_data[d].append({
+            if d not in data: data[d] = []
+            data[d].append({
                 "id": int(time.time()*1000)+_, "time": str(row['Time']), "title": str(row['Title']),
                 "loc": str(row.get('Location','')), "cost": int(row.get('Cost',0)), 
-                "note": str(row.get('Note','')), "expenses": [], "trans_mode": "📍", "trans_min": 30
+                "note": str(row.get('Note','')), "expenses": []
             })
-        st.session_state.trip_data = new_data
-        st.session_state.trip_days_count = max(new_data.keys())
+        st.session_state.trip_data = data
+        st.session_state.trip_days_count = max(data.keys())
         st.rerun()
     except: st.error("格式錯誤")
 
@@ -153,9 +201,9 @@ cur = THEMES[st.session_state.selected_theme_name]
 
 if "trip_data" not in st.session_state:
     st.session_state.trip_data = {
-        1: [{"id":101, "time":"10:00", "title":"抵達", "loc":"關西機場", "cost":0, "note":"入境", "expenses":[], "trans_mode":"🚆", "trans_min":45}],
-        2: [{"id":201, "time":"09:00", "title":"清水寺", "loc":"清水寺", "cost":400, "note":"", "expenses":[], "trans_mode":"🚶", "trans_min":20}],
-        3:[], 4:[], 5:[]
+        1: [{"id": 101, "time": "10:00", "title": "抵達", "loc": "關西機場", "cost": 0, "note": "入境", "expenses": [], "trans_mode": "🚆", "trans_min": 45}],
+        2: [{"id": 201, "time": "09:00", "title": "清水寺", "loc": "清水寺", "cost": 400, "note": "", "expenses": [], "trans_mode": "🚶", "trans_min": 20}],
+        3: [], 4: [], 5: []
     }
 
 if "flight_info" not in st.session_state:
@@ -172,45 +220,73 @@ PHRASES = {
     "韓國": {"招呼":[("你好","안녕하세요"),("謝謝","감사합니다")], "購物":[("多少錢","얼마예요"),("打折","깎아 주세요")]},
     "泰國": {"招呼":[("你好","Sawasdee"),("謝謝","Khop khun")], "購物":[("多少錢","Tao rai"),("太貴","Paeng mak")]}
 }
-# 預設回退
 if st.session_state.target_country not in PHRASES: PHRASES[st.session_state.target_country] = {"通用": [("你好","Hello")]}
 
 # -------------------------------------
-# 4. CSS (安全寫法)
+# 4. CSS (使用取代法，最安全)
 # -------------------------------------
-css_code = """
+css_template = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=Inter:wght@400;600&display=swap');
 .stApp { background-color: __BG__ !important; color: __TXT__ !important; font-family: 'Inter', sans-serif !important; }
 [data-testid="stSidebarCollapsedControl"], footer { display: none !important; }
 header[data-testid="stHeader"] { height: 0 !important; background: transparent !important; }
+
+/* Apple Card */
 .apple-card {
-    background: rgba(255, 255, 255, 0.95); border-radius: 18px; padding: 15px; margin-bottom: 0px;
-    border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 4px 15px rgba(0,0,0,0.04);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 0px;
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.04);
 }
-.weather-box {
-    background: linear-gradient(135deg, __PRI__ 0%, __TXT__ 150%); color: white;
-    padding: 15px 20px; border-radius: 20px; margin-bottom: 20px;
+.apple-time { font-weight: 700; font-size: 1.1rem; color: __TXT__; }
+.apple-loc { font-size: 0.9rem; color: __SUB__; display:flex; align-items:center; gap:5px; margin-top:5px; }
+
+/* Weather Widget */
+.apple-weather {
+    background: linear-gradient(135deg, __PRI__ 0%, __TXT__ 150%);
+    color: white;
+    padding: 18px 22px;
+    border-radius: 22px;
+    margin-bottom: 25px;
     display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
 }
-.trans-box {
-    background: #FFF; border-radius: 12px; padding: 8px 12px; margin: 5px 0 5px 50px;
-    border: 1px solid #E0E0E0; display: flex; justify-content: space-between; align-items: center;
+
+/* Transport Card (Google Maps Style) */
+.trans-card {
+    background: #FFFFFF;
+    border-radius: 12px;
+    padding: 10px 15px;
+    margin: 8px 0 8px 50px;
+    border: 1px solid #E5E5EA;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.03);
 }
+.trans-tag {
+    font-size: 0.7rem; padding: 3px 8px; border-radius: 6px;
+    background: #F2F2F7; color: #636366; font-weight: 600; margin-left: 8px;
+}
+
+/* Elements */
 div[data-testid="stRadio"] > div { background-color: __SEC__; padding: 4px; border-radius: 12px; overflow-x: auto; flex-wrap: nowrap; }
-div[data-testid="stRadio"] label[data-checked="true"] { background-color: __CARD__; color: __TXT__; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+div[data-testid="stRadio"] label { background: transparent; border: none; flex: 1; text-align: center; border-radius: 9px; }
+div[data-testid="stRadio"] label[data-checked="true"] { background-color: __CARD__; color: __TXT__; box-shadow: 0 2px 5px rgba(0,0,0,0.1); font-weight: bold; }
 input { color: __TXT__ !important; }
 </style>
 """
-# 替換變數
-for k, v in [("__BG__", cur['bg']), ("__TXT__", cur['text']), ("__PRI__", cur['primary']), ("__SEC__", cur['secondary']), ("__CARD__", cur['card'])]:
-    css_code = css_code.replace(k, v)
-st.markdown(css_code, unsafe_allow_html=True)
+# 替換 CSS 變數
+for k, v in [("__BG__", cur['bg']), ("__TXT__", cur['text']), ("__PRI__", cur['primary']), ("__SEC__", cur['secondary']), ("__CARD__", cur['card']), ("__SUB__", cur['sub'])]:
+    css_template = css_template.replace(k, v)
+st.markdown(css_template, unsafe_allow_html=True)
 
 # -------------------------------------
 # 5. UI
 # -------------------------------------
-st.markdown(f'<div style="font-size:2rem;font-weight:900;text-align:center;color:{cur["text"]};">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
+st.markdown(f'<div style="font-size:2.2rem;font-weight:900;text-align:center;color:{cur["text"]};">{st.session_state.trip_title}</div>', unsafe_allow_html=True)
 st.markdown(f'<div style="text-align:center;color:{cur["sub"]};font-size:0.9rem;margin-bottom:20px;">{st.session_state.start_date.strftime("%Y/%m/%d")} 出發</div>', unsafe_allow_html=True)
 
 with st.expander("⚙️ 設定"):
@@ -230,7 +306,6 @@ with st.expander("⚙️ 設定"):
 for d in range(1, st.session_state.trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
-# Tabs
 t1, t2, t3, t4, t5, t6 = st.tabs(["📅 行程", "🗺️ 地圖", "✨ 願望", "🎒 清單", "ℹ️ 資訊", "🧰 工具"])
 
 # --- Tab 1: 行程 ---
@@ -243,15 +318,15 @@ with t1:
     # 預算
     tc = sum([it['cost'] for it in items])
     ta = sum([sum(x['price'] for x in it.get('expenses', [])) for it in items])
-    c_m1, c_m2 = st.columns(2)
-    c_m1.metric("預算", f"¥{tc:,}")
-    c_m2.metric("支出", f"¥{ta:,}", delta=f"{tc-ta:,}" if ta>0 else None)
+    c1, c2 = st.columns(2)
+    c1.metric("預算", f"¥{tc:,}")
+    c2.metric("支出", f"¥{ta:,}", delta=f"{tc-ta:,}" if ta>0 else None)
     if tc > 0 and ta > 0: st.progress(min(ta/tc, 1.0))
 
     # 天氣
     floc = items[0]['loc'] if items and items[0]['loc'] else "City"
-    w = Weather.get(floc, curr_d)
-    st.markdown(f"""<div class="weather-box"><div><div style="font-size:2rem;">{w['icon']}</div><div>{w['high']}° / {w['low']}°</div></div><div style="text-align:right;"><b>{curr_d.strftime('%m/%d')}</b><br>📍 {floc}<br>{w['desc']}</div></div>""", unsafe_allow_html=True)
+    w = WeatherService.get_forecast(floc, curr_d)
+    st.markdown(f"""<div class="apple-weather"><div style="display:flex;align-items:center;gap:15px;"><div style="font-size:2.5rem;">{w['icon']}</div><div><div style="font-size:2rem;font-weight:700;">{w['high']}°</div><div>L:{w['low']}°</div></div></div><div style="text-align:right;"><div style="font-weight:700;">{curr_d.strftime('%m/%d')}</div><div>📍 {floc}</div><div>{w['desc']}</div></div></div>""", unsafe_allow_html=True)
 
     is_edit = st.toggle("編輯模式 (含收據)")
     if is_edit and st.button("➕ 新增"):
@@ -261,17 +336,36 @@ with t1:
     if not items: st.info("尚無行程")
 
     for i, item in enumerate(items):
-        # 卡片
-        mlink = item['loc'] if item['loc'].startswith("http") else f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(item['loc'])}"
-        mbtn = f'<a href="{mlink}" target="_blank" style="text-decoration:none;margin-left:5px;font-size:0.8rem;">🗺️</a>' if item['loc'] else ""
-        cost_tg = f'<span style="background:{cur["primary"]};color:white;padding:2px 6px;border-radius:8px;font-size:0.7rem;">¥{item["cost"]:,}</span>' if item['cost']>0 else ""
+        # Card Content
+        mlink = get_map_link(item['loc'])
+        mbtn = f'<a href="{mlink}" target="_blank" style="text-decoration:none;margin-left:5px;font-size:0.8rem;background:{cur["secondary"]};color:{cur["text"]};padding:2px 6px;border-radius:6px;">🗺️</a>' if item['loc'] else ""
+        cost_tg = f'<span style="background:{cur["primary"]};color:white;padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:bold;">¥{item["cost"]:,}</span>' if item['cost']>0 else ""
         
         exp_htm = ""
         if item.get('expenses'):
-            rows = "".join([f"<div style='display:flex;justify-content:space-between;font-size:0.8rem;color:#666;'><span>{e['name']}</span><span>¥{e['price']:,}</span></div>" for e in item['expenses']])
-            exp_htm = f"<div style='margin-top:5px;padding-top:5px;border-top:1px dashed #DDD;'>{rows}</div>"
+            rows = "".join([f"<div style='display:flex;justify-content:space-between;font-size:0.8rem;color:#888;'><span>{e['name']}</span><span>¥{e['price']:,}</span></div>" for e in item['expenses']])
+            exp_htm = f"<div style='margin-top:8px;padding-top:5px;border-top:1px dashed #EEE;'>{rows}</div>"
 
-        st.markdown(f"""<div style="display:flex;gap:10px;margin-bottom:0px;"><div style="width:50px;text-align:center;font-weight:bold;">{item['time']}<br><div style="height:100%;width:2px;background:{cur['secondary']};margin:0 auto;"></div></div><div style="flex:1;"><div class="apple-card"><div style="display:flex;justify-content:space-between;"><b>{item['title']}</b>{cost_tg}</div><div style="font-size:0.85rem;color:#666;">📍 {item['loc']}{mbtn}</div><div style="font-size:0.85rem;background:{cur['bg']};padding:5px;margin-top:5px;border-radius:5px;">📝 {item['note']}</div>{exp_htm}</div></div></div>""", unsafe_allow_html=True)
+        # Itinerary Card HTML
+        st.markdown(f"""
+        <div style="display:flex;gap:15px;">
+            <div style="display:flex;flex-direction:column;align-items:center;width:50px;">
+                <div style="font-weight:700;color:{cur['text']};font-size:1rem;">{item['time']}</div>
+                <div style="flex-grow:1;width:2px;background:{cur['secondary']};margin:5px 0;opacity:0.4;"></div>
+            </div>
+            <div style="flex-grow:1;">
+                <div class="apple-card">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div style="font-weight:bold;font-size:1.1rem;margin-bottom:4px;">{item['title']}</div>
+                        {cost_tg}
+                    </div>
+                    <div style="font-size:0.9rem;color:{cur['sub']};">📍 {item['loc'] or '未設定'} {mbtn}</div>
+                    <div style="font-size:0.85rem;color:{cur['sub']};background:{cur['bg']};padding:6px 10px;border-radius:8px;margin-top:6px;">📝 {item['note']}</div>
+                    {exp_htm}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         if is_edit:
             with st.container(border=True):
@@ -280,149 +374,4 @@ with t1:
                 item['time'] = c2.text_input("時", item['time'], key=f"tm_{item['id']}")
                 item['loc'] = st.text_input("地", item['loc'], key=f"l_{item['id']}")
                 item['cost'] = st.number_input("算", value=item['cost'], step=100, key=f"c_{item['id']}")
-                item['note'] = st.text_area("註", item['note'], key=f"n_{item['id']}")
-                
-                st.caption("📷 收據")
-                cam = st.toggle("相機", key=f"tg_{item['id']}")
-                if cam: ufile = st.camera_input("拍", key=f"cm_{item['id']}", label_visibility="collapsed")
-                else: ufile = st.file_uploader("傳", type=["jpg","png"], key=f"up_{item['id']}", label_visibility="collapsed")
-                
-                fk = f"scan_ok_{item['id']}"
-                if ufile and not st.session_state.get(fk, False):
-                    with st.spinner("分析中..."):
-                        res = analyze_receipt_image(ufile)
-                    cnt = 0
-                    for r in res:
-                        if r['price']>0: 
-                            item['expenses'].append(r)
-                            cnt+=1
-                    if cnt>0:
-                        item['cost'] = sum(x['price'] for x in item['expenses'])
-                        st.success(f"加入 {cnt} 筆")
-                        st.session_state[fk] = True
-                        time.sleep(1)
-                        st.rerun()
-                if not ufile: st.session_state[fk] = False
-
-                cx1, cx2, cx3 = st.columns([2,1,1])
-                n = cx1.text_input("項", key=f"nn_{item['id']}")
-                p = cx2.number_input("金", min_value=0, key=f"np_{item['id']}")
-                if cx3.button("➕", key=f"bt_{item['id']}"):
-                     if n and p>0:
-                        item['expenses'].append({"name":n, "price":p})
-                        item['cost'] = sum(x['price'] for x in item['expenses'])
-                        st.rerun()
-                
-                if item.get('expenses'):
-                    with st.expander("細項"):
-                        for idx, e in enumerate(item['expenses']):
-                            c_d1, c_d2 = st.columns([4,1])
-                            c_d1.text(f"{e['name']} {e['price']}")
-                            if c_d2.button("X", key=f"dx_{item['id']}_{idx}"):
-                                item['expenses'].pop(idx)
-                                st.rerun()
-                if st.button("🗑️ 刪除", key=f"rm_{item['id']}"):
-                    st.session_state.trip_data[day].pop(i)
-                    st.rerun()
-
-        # 交通
-        if i < len(items)-1:
-            nxt = items[i+1]
-            turl = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(item['loc'])}&destination={urllib.parse.quote(nxt['loc'])}&travelmode=transit"
-            if is_edit:
-                ct1, ct2 = st.columns([1,1])
-                item['trans_mode'] = ct1.selectbox("法", TRANSPORT_OPTIONS, key=f"tr_{item['id']}")
-                item['trans_min'] = ct2.number_input("分", value=item.get('trans_min',30), step=5, key=f"trm_{item['id']}")
-            else:
-                st.markdown(f"""<div style="display:flex;gap:10px;"><div style="width:50px;text-align:center;"><div style="height:100%;width:2px;border-left:2px dashed {cur['secondary']};margin:0 auto;"></div></div><div style="flex:1;padding:5px 0;"><div class="trans-box"><div style="font-size:0.8rem;color:#888;">推薦路線</div><div style="font-weight:bold;">{item.get('trans_mode','📍')}</div><div style="font-size:0.8rem;">{item.get('trans_min',30)} min <a href="{turl}" target="_blank">➤</a></div></div></div></div>""", unsafe_allow_html=True)
-
-# --- Tab 2: 地圖 ---
-with t2:
-    m_list = sorted(st.session_state.trip_data[day], key=lambda x: x['time'])
-    valid = [i for i in m_list if i['loc']]
-    gurl = f"https://www.google.com/maps/dir/{'/'.join([urllib.parse.quote(i['loc']) for i in valid])}" if valid else "#"
-    st.markdown(f"<div style='text-align:center;margin-bottom:10px;'><a href='{gurl}' target='_blank' style='background:{cur['primary']};color:white;padding:10px 20px;border-radius:20px;text-decoration:none;'>Google Maps 導航</a></div>", unsafe_allow_html=True)
-    
-    if MAP_AVAILABLE and valid:
-        start = get_lat_lon(valid[0]['loc']) or [35.6895, 139.6917]
-        m = folium.Map(location=start, zoom_start=13)
-        pts = []
-        for idx, x in enumerate(valid):
-            c = get_lat_lon(x['loc'])
-            if c:
-                pts.append(c)
-                folium.Marker(c, popup=x['title'], icon=folium.Icon(color='red', icon=str(idx+1), prefix='fa')).add_to(m)
-        if len(pts)>1: folium.PolyLine(pts, color="blue", weight=5).add_to(m)
-        st_folium(m, width="100%", height=400)
-    else: st.info("無地圖資料或模組")
-
-# --- Tab 3: 願望 ---
-with t3:
-    with st.expander("➕ 新增"):
-        wt = st.text_input("名")
-        wl = st.text_input("地")
-        wn = st.text_input("註")
-        if st.button("加") and wt:
-            st.session_state.wishlist.append({"id":int(time.time()), "title":wt, "loc":wl, "note":wn})
-            st.rerun()
-    for i, w in enumerate(st.session_state.wishlist):
-        st.markdown(f"""<div class="apple-card" style="border-left:4px solid {cur['primary']};"><b>{w['title']}</b><br><span style="font-size:0.8rem;">{w['loc']} {w['note']}</span></div>""", unsafe_allow_html=True)
-        c1, c2 = st.columns([2,1])
-        td = c1.selectbox("移至", list(range(1, st.session_state.trip_days_count+1)), key=f"wd_{w['id']}")
-        if c2.button("排", key=f"wm_{w['id']}"):
-            st.session_state.trip_data[td].append({"id":int(time.time()), "time":"09:00", "title":w['title'], "loc":w['loc'], "cost":0, "note":w['note'], "expenses":[], "cat":"spot"})
-            st.session_state.wishlist.pop(i)
-            st.rerun()
-
-# --- Tab 4: 清單 ---
-with t4:
-    st.info("建議："+", ".join(get_packing(st.session_state.trip_data, st.session_state.start_date)))
-    for c, its in st.session_state.checklist.items():
-        st.markdown(f"**{c}**")
-        cols = st.columns(2)
-        for idx, (k,v) in enumerate(its.items()):
-            st.session_state.checklist[c][k] = cols[idx%2].checkbox(k, value=v)
-
-# --- Tab 5: 資訊 ---
-with t5:
-    f = st.session_state.flight_info
-    st.markdown(f"""<div class="info-card"><b>航班</b><br>去 {f['out']['date']} {f['out']['code']}<br>回 {f['in']['date']} {f['in']['code']}</div>""", unsafe_allow_html=True)
-    
-    edi = st.toggle("編輯")
-    if edi and st.button("加飯店"): st.session_state.hotel_info.append({"id":int(time.time()),"name":"新飯店","addr":""})
-    
-    for i, h in enumerate(st.session_state.hotel_info):
-        if edi:
-            h['name'] = st.text_input("名", h['name'], key=f"hn_{i}")
-            h['addr'] = st.text_input("址", h.get('addr',''), key=f"ha_{i}")
-        lnk = h.get('addr','') if h.get('addr','').startswith("http") else f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(h.get('name',''))}"
-        st.markdown(f"""<div class="info-card" style="border-left:4px solid {cur['primary']};"><b>{h['name']}</b><br>📍 {h.get('addr','')} <a href="{lnk}">Map</a></div>""", unsafe_allow_html=True)
-
-# --- Tab 6: 工具 ---
-with t6:
-    c1, c2 = st.columns(2)
-    if c1.button("☁️ 上傳"):
-        if CLOUD_AVAILABLE:
-            res = cloud_save({"trip":st.session_state.trip_data, "wish":st.session_state.wishlist})
-            st.toast(res[1])
-        else: st.error("無雲端")
-    if c2.button("📥 下載"):
-        if CLOUD_AVAILABLE:
-            raw = cloud_load()
-            if raw:
-                d = json.loads(raw)
-                if "trip" in d: st.session_state.trip_data = {int(k):v for k,v in d['trip'].items()}
-                st.toast("OK")
-                time.sleep(1)
-                st.rerun()
-    
-    st.divider()
-    amt = st.number_input("匯率", step=100)
-    st.metric("NT$", int(amt * st.session_state.exchange_rate))
-    
-    st.divider()
-    tc = st.session_state.target_country
-    if tc in PHRASES:
-        typ = st.selectbox("情境", list(PHRASES[tc].keys()))
-        for p in PHRASES[tc][typ]:
-            st.markdown(f"<div class='apple-card' style='padding:10px;margin-bottom:5px;'>{p[0]}<br><b>{p[1]}</b></div>", unsafe_allow_html=True)
+                item['note'] =
