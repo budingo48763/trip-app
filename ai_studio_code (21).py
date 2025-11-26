@@ -53,7 +53,7 @@ THEMES = {
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_v3")
+        geolocator = Nominatim(user_agent="trip_planner_app_v4_final")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -270,9 +270,8 @@ SURVIVAL_PHRASES = {
 }
 
 # -------------------------------------
-# 4. CSS 樣式
+# 4. CSS 樣式 (使用獨立變數以避免語法錯誤)
 # -------------------------------------
-# 將 CSS 獨立成字串變數，避免 f-string 語法錯誤
 main_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
@@ -407,7 +406,25 @@ with tab1:
     # 天氣
     first_loc = current_items[0]['loc'] if current_items and current_items[0]['loc'] else (st.session_state.target_country if st.session_state.target_country != "日本" else "京都")
     weather = WeatherService.get_forecast(first_loc, current_date)
-    st.markdown(f"""<div class="apple-weather-widget"><div style="display:flex; align-items:center; gap:15px;"><div style="font-size:2.5rem;">{weather['icon']}</div><div><div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div><div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div></div></div><div style="text-align:right;"><div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div><div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div><div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div></div></div>""", unsafe_allow_html=True)
+    
+    # 使用變數儲存 HTML，避免 SyntaxError
+    weather_html = f"""
+    <div class="apple-weather-widget">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <div style="font-size:2.5rem;">{weather['icon']}</div>
+            <div>
+                <div style="font-size:2rem; font-weight:700; line-height:1;">{weather['high']}°</div>
+                <div style="font-size:0.9rem; opacity:0.9;">L:{weather['low']}°</div>
+            </div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-weight:700;">{current_date.strftime('%m/%d %a')}</div>
+            <div style="font-size:0.9rem; opacity:0.9;">📍 {first_loc}</div>
+            <div style="font-size:0.8rem; opacity:0.8; margin-top:2px;">{weather['desc']}</div>
+        </div>
+    </div>
+    """
+    st.markdown(weather_html, unsafe_allow_html=True)
 
     is_edit_mode = st.toggle("編輯模式 (含收據掃描)")
     if is_edit_mode and st.button("➕ 新增行程", use_container_width=True):
@@ -438,8 +455,27 @@ with tab1:
                  rows += f"<div style='display:flex; justify-content:space-between; font-size:0.8rem; color:#888; margin-top:2px;'><span>{exp['name']}</span><span>¥{exp['price']:,}</span></div>"
             expense_details_html = f"<div style='margin-top:8px; padding-top:5px; border-top:1px dashed {current_theme['secondary']}; opacity:0.8;'>{rows}</div>"
 
-        # 行程卡片
-        st.markdown(f"""<div style="display:flex; gap:15px; margin-bottom:0px;"><div style="display:flex; flex-direction:column; align-items:center; width:50px;"><div style="font-weight:700; color:{current_theme['text']}; font-size:1.1rem;">{item['time']}</div><div style="flex-grow:1; width:2px; background:{current_theme['secondary']}; margin:5px 0; opacity:0.3; border-radius:2px;"></div></div><div style="flex-grow:1;"><div class="apple-card" style="margin-bottom:0px;"><div style="display:flex; justify-content:space-between; align-items:flex-start;"><div class="apple-title" style="margin-top:0;">{item['title']}</div>{cost_display}</div><div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>{note_div}{expense_details_html}</div></div></div>""", unsafe_allow_html=True)
+        # 行程卡片 HTML 變數化
+        card_html = f"""
+        <div style="display:flex; gap:15px; margin-bottom:0px;">
+            <div style="display:flex; flex-direction:column; align-items:center; width:50px;">
+                <div style="font-weight:700; color:{current_theme['text']}; font-size:1.1rem;">{item['time']}</div>
+                <div style="flex-grow:1; width:2px; background:{current_theme['secondary']}; margin:5px 0; opacity:0.3; border-radius:2px;"></div>
+            </div>
+            <div style="flex-grow:1;">
+                <div class="apple-card" style="margin-bottom:0px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div class="apple-title" style="margin-top:0;">{item['title']}</div>
+                        {cost_display}
+                    </div>
+                    <div class="apple-loc">📍 {item['loc'] or '未設定'} {map_btn}</div>
+                    {note_div}
+                    {expense_details_html}
+                </div>
+            </div>
+        </div>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
 
         if is_edit_mode:
             with st.container(border=True):
@@ -490,7 +526,7 @@ with tab1:
                  item['trans_mode'] = ct1.selectbox("交通", TRANSPORT_OPTIONS, key=f"trm_{item['id']}")
                  item['trans_min'] = ct2.number_input("分", value=t_min, step=5, key=f"trmin_{item['id']}")
             else:
-                 st.markdown(f"""
+                 trans_html = f"""
                  <div style="display:flex; gap:15px;">
                     <div style="display:flex; flex-direction:column; align-items:center; width:50px;">
                         <div style="flex-grow:1; width:2px; border-left:2px dashed {current_theme['secondary']}; margin:0; opacity:0.6;"></div>
@@ -510,7 +546,9 @@ with tab1:
                             </div>
                         </div>
                     </div>
-                 </div>""", unsafe_allow_html=True)
+                 </div>
+                 """
+                 st.markdown(trans_html, unsafe_allow_html=True)
 
 # ==========================================
 # 2. 地圖軌跡
@@ -624,6 +662,7 @@ with tab5:
                 f_data["arr"] = c2.text_input("抵達", f_data["arr"], key=f"ft2_{f_key}")
                 f_data["dep_loc"] = c1.text_input("起飛地", f_data["dep_loc"], key=f"fl1_{f_key}")
                 f_data["arr_loc"] = c2.text_input("抵達地", f_data["arr_loc"], key=f"fl2_{f_key}")
+        
         st.markdown(f"""<div class="info-card"><div class="info-header"><span>📅 {f_data['date']}</span> <span>✈️ {f_data['code']}</span></div><div class="info-time">{f_data['dep']} -> {f_data['arr']}</div><div class="info-loc"><span>📍 {f_data['dep_loc']}</span> <span style="margin:0 5px;">✈</span> <span>{f_data['arr_loc']}</span></div><div style="text-align:right; margin-top:5px;"><span class="info-tag">{f_label}</span></div></div>""", unsafe_allow_html=True)
 
     st.divider()
@@ -643,5 +682,81 @@ with tab5:
                 if st.button("🗑️ 刪除", key=f"del_h_{hotel['id']}"):
                     st.session_state.hotel_info.pop(i)
                     st.rerun()
+        
+        # 使用變數避免語法錯誤
         map_url = get_single_map_link(hotel['link']) if hotel['link'] else get_single_map_link(hotel['name'])
-        st.markdown(f"""<div class="info-card" style="border-left: 5px solid {current_theme['primary']};"><div class="info-header"><span class="info-tag" style="background:{current_theme['primary']}; color:white;">{hotel['range']}</span><span>{hotel['date']}</span></div><div style="font-size:1.3r
+        hotel_card_html = f"""
+        <div class="info-card" style="border-left: 5px solid {current_theme['primary']};">
+            <div class="info-header">
+                <span class="info-tag" style="background:{current_theme['primary']}; color:white;">{hotel['range']}</span>
+                <span>{hotel['date']}</span>
+            </div>
+            <div style="font-size:1.3rem; font-weight:900; color:{current_theme['text']}; margin: 10px 0;">{hotel['name']}</div>
+            <div class="info-loc" style="margin-bottom:10px;">📍 {hotel['addr']}</div>
+            <a href="{map_url}" target="_blank" style="text-decoration:none; color:{current_theme['primary']}; font-size:0.9rem; font-weight:bold; border:1px solid {current_theme['primary']}; padding:4px 12px; border-radius:20px;">🗺️ 地圖</a>
+        </div>
+        """
+        st.markdown(hotel_card_html, unsafe_allow_html=True)
+
+# ==========================================
+# 6. 工具
+# ==========================================
+with tab6:
+    st.header("🧰 實用工具")
+    
+    st.subheader("☁️ 雲端同步")
+    c1, c2 = st.columns(2)
+    if c1.button("☁️ 上傳"):
+        if CLOUD_AVAILABLE:
+            data = {"trip": st.session_state.trip_data, "wish": st.session_state.wishlist, "check": st.session_state.checklist}
+            res = save_to_cloud(json.dumps(data, default=str))
+            st.toast(res[1] if res[0] else f"錯誤: {res[1]}")
+        else: st.error("缺少雲端套件")
+    if c2.button("📥 下載"):
+        if CLOUD_AVAILABLE:
+            raw = load_from_cloud()
+            if raw:
+                d = json.loads(raw)
+                if "trip" in d: st.session_state.trip_data = {int(k):v for k,v in d['trip'].items()}
+                st.toast("成功")
+                time.sleep(1)
+                st.rerun()
+        else: st.error("缺少雲端套件")
+
+    st.divider()
+    
+    st.subheader("💴 匯率")
+    amt = st.number_input("外幣", step=100)
+    st.metric("台幣", int(amt * st.session_state.exchange_rate))
+    
+    st.divider()
+    
+    st.subheader("🛍️ 購物")
+    edited_df = st.data_editor(st.session_state.shopping_list, num_rows="dynamic", key="shop_edit")
+    if not edited_df.equals(st.session_state.shopping_list):
+        st.session_state.shopping_list = edited_df
+        st.rerun()
+    
+    st.divider()
+    
+    st.subheader("🆘 緊急")
+    target_country_sos = st.session_state.target_country
+    if target_country_sos in SURVIVAL_PHRASES: 
+        sos_map = {
+            "日本": {"迷路": "迷子になりました", "過敏": "アレルギーがあります", "醫院": "病院に連れて行って"},
+            "韓國": {"迷路": "길을 잃었어요", "過敏": "알레르기가 있어요", "醫院": "병원으로 가주세요"},
+            "泰國": {"迷路": "Long tang", "過敏": "Pae a-han", "醫院": "Bai rong paya ban"}
+        }
+        if target_country_sos in sos_map:
+            s_type = st.selectbox("狀況", list(sos_map[target_country_sos].keys()))
+            s_txt = sos_map[target_country_sos][s_type]
+            st.markdown(f"<div style='background:#D32F2F; color:white; padding:20px; border-radius:10px; text-align:center; font-size:1.5rem;'>{s_txt}</div>", unsafe_allow_html=True)
+    
+    st.divider()
+    
+    st.subheader("🗣️ 會話")
+    if target_country_sos in SURVIVAL_PHRASES:
+        phrases = SURVIVAL_PHRASES[target_country_sos]
+        cat = st.selectbox("情境", list(phrases.keys()))
+        for p in phrases[cat]:
+            st.markdown(f"<div class='apple-card' style='padding:10px; margin-bottom:5px;'>{p[0]}<br><b>{p[1]}</b></div>", unsafe_allow_html=True)
