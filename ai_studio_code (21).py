@@ -8,7 +8,7 @@ import random
 import json
 import base64
 
-# --- 嘗試匯入進階套件 (雲端 & 地圖) ---
+# --- 嘗試匯入進階套件 ---
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -18,7 +18,7 @@ except ImportError:
 
 try:
     import folium
-    from folium import plugins  # <--- 關鍵修正：補上這行
+    from folium import plugins
     from streamlit_folium import st_folium
     from geopy.geocoders import Nominatim
     MAP_AVAILABLE = True
@@ -58,34 +58,63 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- AI 導遊對話 ---
+# --- AI 導遊對話 (修復版) ---
 def ask_ai_guide(prompt, context_data):
-    if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
-        return "請先設定 API Key 並安裝 google-generativeai 套件，才能啟用 AI 導遊功能喔！"
+    """發送對話給 Gemini，並附帶目前的行程資訊作為背景知識"""
+    if not GEMINI_AVAILABLE:
+        return "系統提示：請先安裝 google-generativeai 套件。"
+    
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "系統提示：請先在 Secrets 設定 GEMINI_API_KEY。"
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        # 建構系統提示詞
         system_prompt = f"""
         你是一位專業、幽默且貼心的私人旅遊導遊。
+        
         【你的任務】：
         1. 根據使用者的問題，提供景點介紹、美食推薦、交通建議或行程規劃。
         2. 回答要簡潔有力，重點清晰，適合手機閱讀。
+        3. 如果使用者問美食，請推薦具體的店名（如果知道的話）和必點菜色。
         
         【使用者目前的行程資料】：
         {json.dumps(context_data, ensure_ascii=False)}
+        
+        請根據上述行程資料來回答。
         """
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-        chat_history = []
+        
+        # 自動選擇模型
+        target_model_name = 'models/gemini-1.5-flash'
+        try:
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            priority = ['models/gemini-2.0-flash', 'models/gemini-1.5-flash']
+            for p in priority:
+                if p in available_models:
+                    target_model_name = p
+                    break
+        except: pass
+        
+        model = genai.GenerativeModel(target_model_name)
+        
+        # 組合對話歷史 (格式轉換)
+        gemini_history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
+                # 忽略系統預設的歡迎詞
+                if msg["role"] == "assistant" and "你好！我是你的 AI 專業導遊" in msg["content"]:
+                    continue
                 role = "user" if msg["role"] == "user" else "model"
-                chat_history.append({"role": role, "parts": [msg["content"]]})
+                gemini_history.append({"role": role, "parts": [msg["content"]]})
         
-        chat = model.start_chat(history=chat_history)
+        # 加入本次對話
+        chat = model.start_chat(history=gemini_history)
         response = chat.send_message(system_prompt + "\n\n使用者問題：" + prompt)
+        
         return response.text
     except Exception as e:
-        return f"AI 導遊目前有點累（連線錯誤）：{e}"
+        return f"AI 導遊連線錯誤：{e}"
 
 # --- 收據分析 ---
 def analyze_receipt_image(image_file):
@@ -137,7 +166,7 @@ def analyze_receipt_image(image_file):
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_v15_final")
+        geolocator = Nominatim(user_agent="trip_planner_v16_guide_fix")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -372,15 +401,22 @@ main_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
 
-.stApp {{ background-color: {c_bg} !important; color: {c_text} !important; font-family: 'Inter', 'Noto Serif JP', sans-serif !important; }}
+.stApp {{ 
+    background-color: {c_bg} !important;
+    color: {c_text} !important; 
+    font-family: 'Inter', 'Noto Serif JP', sans-serif !important;
+}}
+
 [data-testid="stSidebarCollapsedControl"], footer {{ display: none !important; }}
 header[data-testid="stHeader"] {{ height: 0 !important; background: transparent !important; }}
 
 /* Apple Style Cards */
 .apple-card {{
-    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
     border-radius: 18px; padding: 18px; margin-bottom: 0px;
-    border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
 }}
 .apple-time {{ font-weight: 700; font-size: 1.1rem; color: {c_text}; }}
 .apple-loc {{ font-size: 0.9rem; color: {c_sub}; display:flex; align-items:center; gap:5px; margin-top:5px; }}
@@ -407,8 +443,9 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 
 /* Day Segmented Control */
 div[data-testid="stRadio"] > div {{
-    background-color: {c_sec} !important; padding: 4px !important; border-radius: 12px !important; 
-    gap: 0px !important; border: none !important; overflow-x: auto; flex-wrap: nowrap;
+    background-color: {c_sec} !important;
+    padding: 4px !important; border-radius: 12px !important; gap: 0px !important; border: none !important;
+    overflow-x: auto; flex-wrap: nowrap;
 }}
 div[data-testid="stRadio"] label {{
     background-color: transparent !important; border: none !important;
@@ -416,7 +453,8 @@ div[data-testid="stRadio"] label {{
     border-radius: 9px !important; height: auto !important; min-width: 50px !important;
 }}
 div[data-testid="stRadio"] label[data-checked="true"] {{
-    background-color: {c_card} !important; color: {c_text} !important;
+    background-color: {c_card} !important;
+    color: {c_text} !important;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important; font-weight: bold !important;
 }}
 
@@ -426,6 +464,10 @@ div[data-testid="stRadio"] label[data-checked="true"] {{
     box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0;
 }}
 .info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
+
+/* Map Route Animation */
+.map-tl-container {{ position: relative; max-width: 100%; margin: 20px auto; padding-left: 30px; }}
+.map-tl-item {{ position: relative; margin-bottom: 25px; }}
 
 /* UI Tweaks */
 button[data-baseweb="tab"] {{ border-radius: 20px !important; margin-right:5px !important; }}
@@ -632,23 +674,10 @@ with tab2:
                 coords = get_lat_lon(item['loc'])
                 if coords:
                     route_coords.append(coords)
-                    # 使用數字標記 (1, 2, 3...)
-                    plugins.BeautifyIcon(
-                        number=idx + 1,
-                        border_color="#007AFF",
-                        text_color="#007AFF",
-                        icon_shape="marker"
-                    ).add_to(folium.Marker(coords, popup=item['title']).add_to(m))
+                    plugins.BeautifyIcon(number=idx + 1, border_color="#007AFF", text_color="#007AFF", icon_shape="marker").add_to(folium.Marker(coords, popup=item['title']).add_to(m))
             
-            # 畫出藍色路線
             if len(route_coords) > 1:
-                folium.PolyLine(
-                    route_coords,
-                    color="#007AFF",
-                    weight=5,
-                    opacity=0.8,
-                    tooltip="行程路線"
-                ).add_to(m)
+                folium.PolyLine(route_coords, color="#007AFF", weight=5, opacity=0.8).add_to(m)
             
             st_folium(m, width="100%", height=400)
         else:
@@ -841,17 +870,17 @@ with tab7:
         with st.chat_message("user"):
             st.write(prompt)
             
-        with st.spinner("導遊思考中..."):
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
             context_data = {
                 "target_country": st.session_state.target_country,
                 "current_trip_data": st.session_state.trip_data,
                 "current_date": datetime.now().strftime("%Y-%m-%d")
             }
             response = ask_ai_guide(prompt, context_data)
+            message_placeholder.write(response)
             
         st.session_state.chat_history.append({"role": "assistant", "content": response})
-        with st.chat_message("assistant"):
-            st.write(response)
 
     st.markdown("---")
     st.caption("快速提問：")
