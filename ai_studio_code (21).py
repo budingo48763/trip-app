@@ -57,16 +57,21 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 收據分析 (Gemini 智慧容錯版) ---
+# --- 收據分析 (多筆明細版) ---
 def analyze_receipt_image(image_file):
-    """使用 Google Gemini 分析收據，包含自動模型偵測與除錯功能"""
+    """使用 Google Gemini 分析收據，回傳項目清單"""
     
     # 1. 基本檢查
     if not GEMINI_AVAILABLE:
-        return {"item": "套件未安裝 (模擬)", "price": 1000}
+        # 模擬回傳多筆資料
+        return [
+            {"name": "模擬商品 A", "price": 500},
+            {"name": "模擬商品 B", "price": 350},
+            {"name": "消費稅", "price": 85}
+        ]
     
     if "GEMINI_API_KEY" not in st.secrets:
-        return {"item": "請設定 Secrets (模擬)", "price": 2000}
+        return [{"name": "請設定 API Key", "price": 0}]
 
     try:
         # 2. 設定 API
@@ -75,16 +80,16 @@ def analyze_receipt_image(image_file):
         # 3. 處理圖片
         img = Image.open(image_file)
         
-        # 4. 定義提示詞
+        # 4. 定義提示詞 (要求回傳 List)
         prompt = """
-        你是一個旅遊記帳助手。請分析這張收據圖片。
-        請提取以下資訊：
-        1. 主要的店名或商品類別 (例如：7-11, 拉麵, 藥妝店)。
-        2. 總金額 (Total Price)，只提取數字。
+        你是一個旅遊記帳助手。請分析這張收據圖片，列出所有的消費品項。
         
-        請直接回傳 JSON 格式，不要有 markdown 標記。
-        格式範例： {"item": "一蘭拉麵", "price": 1280}
-        如果無法辨識，price 請回傳 0。
+        請遵守以下規則：
+        1. 提取每一項商品的名稱與金額。
+        2. 如果有服務費或稅金，也列為單獨的項目。
+        3. 直接回傳一個 JSON Array (List)，不要包含 Markdown 標記 (如 ```json)。
+        4. 格式範例： [{"name": "醬油拉麵", "price": 980}, {"name": "啤酒", "price": 500}]
+        5. price 欄位請給我純數字 (Integer)。
         """
 
         # 5. 自動尋找可用模型
@@ -118,21 +123,26 @@ def analyze_receipt_image(image_file):
         
         # 7. 解析回傳結果
         text = response.text.strip()
+        # 清理 markdown
         if text.startswith("```"):
             text = text.replace("```json", "").replace("```", "")
         
         data = json.loads(text)
+        
+        # 確保回傳的是 List，如果是 Dict (單一物件) 則包成 List
+        if isinstance(data, dict):
+            return [data]
         return data
 
     except Exception as e:
-        return {"item": f"分析失敗", "price": 0}
+        return [{"name": "分析失敗", "price": 0}]
 
 # --- 地理編碼 ---
 @st.cache_data
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_app_final_v11")
+        geolocator = Nominatim(user_agent="trip_planner_app_final_v12")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -207,23 +217,16 @@ def get_packing_recommendations(trip_data, start_date):
 def add_expense_callback(item_id, day_num):
     name_key = f"new_exp_n_{item_id}"
     price_key = f"new_exp_p_{item_id}"
-    flag_key = f"scan_done_{item_id}"
-    
     name = st.session_state.get(name_key, "")
     price = st.session_state.get(price_key, 0)
-    
     if name and price > 0:
         target_item = next((x for x in st.session_state.trip_data[day_num] if x['id'] == item_id), None)
         if target_item:
             if "expenses" not in target_item: target_item["expenses"] = []
             target_item['expenses'].append({"name": name, "price": price})
             target_item['cost'] = sum(x['price'] for x in target_item['expenses'])
-            
-            # 清空輸入與重置掃描狀態
             st.session_state[name_key] = ""
             st.session_state[price_key] = 0
-            if flag_key in st.session_state:
-                st.session_state[flag_key] = False # 重置標記，允許下一次掃描
 
 def get_single_map_link(location):
     if not location: return "#"
@@ -563,22 +566,34 @@ with tab1:
                 # 自動填入邏輯 (加入 Flag 防止循環)
                 scan_flag_key = f"scan_done_{item['id']}"
                 
-                # 如果有上傳檔案，且還沒被標記為已處理
                 if uploaded_receipt and not st.session_state.get(scan_flag_key, False):
                     with st.spinner("正在分析收據..."):
-                        result = analyze_receipt_image(uploaded_receipt)
+                        results = analyze_receipt_image(uploaded_receipt)
                     
-                    st.success(f"已辨識：{result['item']} ¥{result['price']}")
-                    
-                    # 寫入 session_state
-                    st.session_state[f"new_exp_n_{item['id']}"] = result['item']
-                    st.session_state[f"new_exp_p_{item['id']}"] = result['price']
-                    
-                    # 標記為已處理，避免無限重整
-                    st.session_state[scan_flag_key] = True
-                    st.rerun()
+                    if isinstance(results, list):
+                        count = 0
+                        total_p = 0
+                        for res in results:
+                            n = res.get('name', '未知商品')
+                            p = res.get('price', 0)
+                            if p > 0: # 只加入有金額的項目
+                                item['expenses'].append({'name': n, 'price': p})
+                                total_p += p
+                                count += 1
+                        
+                        if count > 0:
+                            # 更新總金額
+                            item['cost'] = sum(x['price'] for x in item['expenses'])
+                            st.success(f"已自動加入 {count} 筆明細 (總計 ¥{total_p})")
+                            st.session_state[scan_flag_key] = True
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.warning("未能辨識出有效金額")
+                    else:
+                        st.error("分析格式錯誤")
                 
-                # 如果使用者取消了圖片 (uploaded_receipt 為 None)，重置 flag
+                # 重置 Flag
                 if not uploaded_receipt and st.session_state.get(scan_flag_key, False):
                     st.session_state[scan_flag_key] = False
 
