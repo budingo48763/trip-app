@@ -57,17 +57,15 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 收據分析 (多筆明細版) ---
+# --- 收據分析 (翻譯 + 排除雜訊版) ---
 def analyze_receipt_image(image_file):
-    """使用 Google Gemini 分析收據，回傳項目清單"""
+    """使用 Google Gemini 分析收據，包含翻譯與排除非商品項目"""
     
     # 1. 基本檢查
     if not GEMINI_AVAILABLE:
-        # 模擬回傳多筆資料
         return [
-            {"name": "模擬商品 A", "price": 500},
-            {"name": "模擬商品 B", "price": 350},
-            {"name": "消費稅", "price": 85}
+            {"name": "おにぎり (飯糰) - 模擬", "price": 130},
+            {"name": "コーラ (可樂) - 模擬", "price": 140}
         ]
     
     if "GEMINI_API_KEY" not in st.secrets:
@@ -80,16 +78,16 @@ def analyze_receipt_image(image_file):
         # 3. 處理圖片
         img = Image.open(image_file)
         
-        # 4. 定義提示詞 (要求回傳 List)
+        # 4. 定義提示詞 (關鍵修改：加入翻譯與排除規則)
         prompt = """
-        你是一個旅遊記帳助手。請分析這張收據圖片，列出所有的消費品項。
-        
-        請遵守以下規則：
-        1. 提取每一項商品的名稱與金額。
-        2. 如果有服務費或稅金，也列為單獨的項目。
-        3. 直接回傳一個 JSON Array (List)，不要包含 Markdown 標記 (如 ```json)。
-        4. 格式範例： [{"name": "醬油拉麵", "price": 980}, {"name": "啤酒", "price": 500}]
-        5. price 欄位請給我純數字 (Integer)。
+        你是一個專業的旅遊記帳助手。請分析這張收據圖片，列出實際購買的商品明細。
+
+        請嚴格遵守以下規則：
+        1. 【翻譯】：將商品名稱翻譯成「繁體中文」，格式為：「原文 (中文翻譯)」。例如："手巻おにぎり (手卷飯糰)"。
+        2. 【金額】：提取該項目的單價或總價（Integer）。
+        3. 【排除】：絕對不要包含「小計」、「消費稅」、「合計」、「現計」、「釣錢(找零)」、「対象(對象)」、「還元(回饋)」等統計欄位。只列出具體的商品。
+        4. 【格式】：直接回傳一個 JSON Array，不要有 Markdown 標記。
+           範例：[{"name": "コカコーラ (可口可樂)", "price": 140}, {"name": "レジ袋 (塑膠袋)", "price": 3}]
         """
 
         # 5. 自動尋找可用模型
@@ -101,7 +99,7 @@ def analyze_receipt_image(image_file):
         except:
             pass
 
-        # 定義優先順序
+        # 定義優先順序 (優先用 2.0 Flash)
         priority_models = [
             'models/gemini-2.0-flash',
             'models/gemini-2.0-flash-exp',
@@ -111,7 +109,7 @@ def analyze_receipt_image(image_file):
             'models/gemini-pro-vision'
         ]
 
-        target_model_name = 'models/gemini-1.5-flash' # 預設備案
+        target_model_name = 'models/gemini-1.5-flash'
         for candidate in priority_models:
             if candidate in available_models:
                 target_model_name = candidate
@@ -123,19 +121,17 @@ def analyze_receipt_image(image_file):
         
         # 7. 解析回傳結果
         text = response.text.strip()
-        # 清理 markdown
         if text.startswith("```"):
             text = text.replace("```json", "").replace("```", "")
         
         data = json.loads(text)
         
-        # 確保回傳的是 List，如果是 Dict (單一物件) 則包成 List
         if isinstance(data, dict):
             return [data]
         return data
 
     except Exception as e:
-        return [{"name": "分析失敗", "price": 0}]
+        return [{"name": f"分析失敗: {e}", "price": 0}]
 
 # --- 地理編碼 ---
 @st.cache_data
