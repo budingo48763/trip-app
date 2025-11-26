@@ -58,19 +58,20 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- AI 導遊對話 (修復版) ---
-def ask_ai_guide(prompt, context_data):
-    """發送對話給 Gemini，並附帶目前的行程資訊作為背景知識"""
+# --- AI 導遊對話 (串流版) ---
+def ask_ai_guide_stream(prompt, context_data):
+    """發送對話給 Gemini (串流模式)"""
     if not GEMINI_AVAILABLE:
-        return "系統提示：請先安裝 google-generativeai 套件。"
+        yield "系統提示：請先安裝 google-generativeai 套件。"
+        return
     
     if "GEMINI_API_KEY" not in st.secrets:
-        return "系統提示：請先在 Secrets 設定 GEMINI_API_KEY。"
+        yield "系統提示：請先在 Secrets 設定 GEMINI_API_KEY。"
+        return
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 建構系統提示詞
         system_prompt = f"""
         你是一位專業、幽默且貼心的私人旅遊導遊。
         
@@ -98,23 +99,26 @@ def ask_ai_guide(prompt, context_data):
         
         model = genai.GenerativeModel(target_model_name)
         
-        # 組合對話歷史 (格式轉換)
+        # 組合對話歷史
         gemini_history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
-                # 忽略系統預設的歡迎詞
                 if msg["role"] == "assistant" and "你好！我是你的 AI 專業導遊" in msg["content"]:
                     continue
                 role = "user" if msg["role"] == "user" else "model"
                 gemini_history.append({"role": role, "parts": [msg["content"]]})
         
-        # 加入本次對話
         chat = model.start_chat(history=gemini_history)
-        response = chat.send_message(system_prompt + "\n\n使用者問題：" + prompt)
         
-        return response.text
+        # 使用 stream=True
+        response = chat.send_message(system_prompt + "\n\n使用者問題：" + prompt, stream=True)
+        
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
     except Exception as e:
-        return f"AI 導遊連線錯誤：{e}"
+        yield f"AI 導遊連線錯誤：{e}"
 
 # --- 收據分析 ---
 def analyze_receipt_image(image_file):
@@ -137,7 +141,6 @@ def analyze_receipt_image(image_file):
         4. 【格式】：直接回傳一個 JSON Array，不要有 Markdown 標記。
            範例：[{"name": "コカコーラ (可口可樂)", "price": 140}]
         """
-        # 優先順序
         priority_models = ['models/gemini-2.0-flash', 'models/gemini-1.5-flash']
         target_model_name = 'models/gemini-1.5-flash'
         try:
@@ -166,7 +169,7 @@ def analyze_receipt_image(image_file):
 def get_lat_lon(location_name):
     if not MAP_AVAILABLE: return None
     try:
-        geolocator = Nominatim(user_agent="trip_planner_v16_guide_fix")
+        geolocator = Nominatim(user_agent="trip_planner_v17_stream")
         location = geolocator.geocode(location_name)
         if location:
             return (location.latitude, location.longitude)
@@ -322,6 +325,10 @@ if "chat_history" not in st.session_state:
         {"role": "assistant", "content": "你好！我是你的 AI 專業導遊。我可以幫你規劃行程、介紹景點、推薦美食，或提醒你旅遊注意事項。"}
     ]
 
+# 用來觸發快速按鈕的 AI 請求
+if "pending_ai_query" not in st.session_state:
+    st.session_state.pending_ai_query = None
+
 current_theme = THEMES[st.session_state.selected_theme_name]
 
 if "trip_data" not in st.session_state:
@@ -401,22 +408,15 @@ main_css = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Inter:wght@400;600&display=swap');
 
-.stApp {{ 
-    background-color: {c_bg} !important;
-    color: {c_text} !important; 
-    font-family: 'Inter', 'Noto Serif JP', sans-serif !important;
-}}
-
+.stApp {{ background-color: {c_bg} !important; color: {c_text} !important; font-family: 'Inter', 'Noto Serif JP', sans-serif !important; }}
 [data-testid="stSidebarCollapsedControl"], footer {{ display: none !important; }}
 header[data-testid="stHeader"] {{ height: 0 !important; background: transparent !important; }}
 
 /* Apple Style Cards */
 .apple-card {{
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(20px);
+    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px);
     border-radius: 18px; padding: 18px; margin-bottom: 0px;
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
 }}
 .apple-time {{ font-weight: 700; font-size: 1.1rem; color: {c_text}; }}
 .apple-loc {{ font-size: 0.9rem; color: {c_sub}; display:flex; align-items:center; gap:5px; margin-top:5px; }}
@@ -443,9 +443,8 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 
 /* Day Segmented Control */
 div[data-testid="stRadio"] > div {{
-    background-color: {c_sec} !important;
-    padding: 4px !important; border-radius: 12px !important; gap: 0px !important; border: none !important;
-    overflow-x: auto; flex-wrap: nowrap;
+    background-color: {c_sec} !important; padding: 4px !important; border-radius: 12px !important; 
+    gap: 0px !important; border: none !important; overflow-x: auto; flex-wrap: nowrap;
 }}
 div[data-testid="stRadio"] label {{
     background-color: transparent !important; border: none !important;
@@ -453,8 +452,7 @@ div[data-testid="stRadio"] label {{
     border-radius: 9px !important; height: auto !important; min-width: 50px !important;
 }}
 div[data-testid="stRadio"] label[data-checked="true"] {{
-    background-color: {c_card} !important;
-    color: {c_text} !important;
+    background-color: {c_card} !important; color: {c_text} !important;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important; font-weight: bold !important;
 }}
 
@@ -464,10 +462,6 @@ div[data-testid="stRadio"] label[data-checked="true"] {{
     box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0;
 }}
 .info-tag {{ background: {c_bg}; color: {c_sub}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
-
-/* Map Route Animation */
-.map-tl-container {{ position: relative; max-width: 100%; margin: 20px auto; padding-left: 30px; }}
-.map-tl-item {{ position: relative; margin-bottom: 25px; }}
 
 /* UI Tweaks */
 button[data-baseweb="tab"] {{ border-radius: 20px !important; margin-right:5px !important; }}
@@ -677,7 +671,7 @@ with tab2:
                     plugins.BeautifyIcon(number=idx + 1, border_color="#007AFF", text_color="#007AFF", icon_shape="marker").add_to(folium.Marker(coords, popup=item['title']).add_to(m))
             
             if len(route_coords) > 1:
-                folium.PolyLine(route_coords, color="#007AFF", weight=5, opacity=0.8).add_to(m)
+                folium.PolyLine(route_coords, color="#007AFF", weight=5, opacity=0.8, tooltip="行程路線").add_to(m)
             
             st_folium(m, width="100%", height=400)
         else:
@@ -861,36 +855,79 @@ with tab6:
 with tab7:
     st.header("🤖 AI 隨身導遊")
     
+    # 初始化觸發器
+    if "trigger_ai" not in st.session_state:
+        st.session_state.trigger_ai = False
+    if "trigger_query" not in st.session_state:
+        st.session_state.trigger_query = ""
+
+    col_head_1, col_head_2 = st.columns([4, 1])
+    if col_head_2.button("🗑️ 清除"):
+        st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
+        st.rerun()
+
+    # 顯示歷史訊息
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
             
+    # 處理來自快速按鈕的觸發
+    if st.session_state.trigger_ai:
+        prompt = st.session_state.trigger_query
+        st.session_state.trigger_ai = False # 重置觸發器
+        st.session_state.trigger_query = ""
+        
+        # 顯示使用者訊息
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
+        
+        # 生成回應
+        with st.chat_message("assistant"):
+            context_data = {
+                "target_country": st.session_state.target_country,
+                "current_trip_data": st.session_state.trip_data,
+                "current_date": datetime.now().strftime("%Y-%m-%d")
+            }
+            response_stream = ask_ai_guide_stream(prompt, context_data)
+            full_response = st.write_stream(response_stream)
+            
+        st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+        st.rerun()
+
+    # 一般輸入框
     if prompt := st.chat_input("問我行程、美食或交通問題..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
             
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
             context_data = {
                 "target_country": st.session_state.target_country,
                 "current_trip_data": st.session_state.trip_data,
                 "current_date": datetime.now().strftime("%Y-%m-%d")
             }
-            response = ask_ai_guide(prompt, context_data)
-            message_placeholder.write(response)
+            response_stream = ask_ai_guide_stream(prompt, context_data)
+            full_response = st.write_stream(response_stream)
             
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        st.session_state.chat_history.append({"role": "assistant", "content": full_response})
 
     st.markdown("---")
     st.caption("快速提問：")
     col_q1, col_q2, col_q3 = st.columns(3)
+    
+    # 快速按鈕邏輯修改：不直接 append，而是設定 trigger
     if col_q1.button("📅 檢視行程"):
-        st.session_state.chat_history.append({"role": "user", "content": "請幫我檢查目前的行程安排是否順暢，有沒有建議修改的地方？"})
+        st.session_state.trigger_query = "請幫我檢查目前的行程安排是否順暢，有沒有建議修改的地方？"
+        st.session_state.trigger_ai = True
         st.rerun()
+        
     if col_q2.button("🍜 美食推薦"):
-        st.session_state.chat_history.append({"role": "user", "content": "根據我目前的行程地點，推薦一些附近必吃的美食。"})
+        st.session_state.trigger_query = "根據我目前的行程地點，推薦一些附近必吃的美食。"
+        st.session_state.trigger_ai = True
         st.rerun()
+        
     if col_q3.button("⚠️ 注意事項"):
-        st.session_state.chat_history.append({"role": "user", "content": f"去{st.session_state.target_country}旅遊有什麼需要特別注意的事項或禮儀？"})
+        st.session_state.trigger_query = f"去{st.session_state.target_country}旅遊有什麼需要特別注意的事項或禮儀？"
+        st.session_state.trigger_ai = True
         st.rerun()
