@@ -7,3 +7,6 @@ pandas
 openpyxl
 streamlit-cropper
 pillow
+streamlit-folium
+folium
+geopy
