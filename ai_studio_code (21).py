@@ -115,12 +115,16 @@ def ask_ai_guide_stream(prompt, context_data):
     except Exception as e:
         yield f"AI 連線錯誤: {e}"
 
-# --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
     model = get_gemini_model()
-    if not model:
-        yield "⚠️ AI 未啟用"
-        return
+    # ... 省略 ...
+    try:
+        # ... 省略 ...
+    except Exception as e:
+        if "429" in str(e):
+            yield "⚠️ 系統忙碌中 (達到 API 请求上限)，請稍等一分鐘後再點擊「重新生成」。"
+        else:
+            yield f"連線錯誤: {e}"
 
     try:
         prompt = f"""
