@@ -7,7 +7,7 @@ import pandas as pd
 import random
 import json
 import base64
-import re  # [修正] 新增 regex 模組用於解析 JSON
+import re
 
 # --- 嘗試匯入進階套件 ---
 try:
@@ -50,69 +50,34 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- [修正] 自動取得可用的 Gemini 模型 (更穩健的版本) ---
+# --- [修正] 自動取得可用的 Gemini 模型 ---
 def get_gemini_model():
     """自動偵測並回傳一個可用的 GenerativeModel 物件"""
     if not GEMINI_AVAILABLE:
         return None
     
-    # 檢查是否設定了 secrets
     if "GEMINI_API_KEY" not in st.secrets:
-        # 本機測試時，若沒有 secrets.toml，可在此處硬寫 (不建議提交到 git)
         return None
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # [修正] 不依賴 list_models，直接優先嘗試穩定模型，提升速度與容錯率
-        # 依序嘗試：Flash (快/便宜) -> Pro (強大) -> 舊版
+        # [修正] 針對 404 錯誤，擴充模型清單，並加入舊版模型作為備案
+        # 如果 1.5-flash 失敗，程式雖不會自動切換(因為是在生成時才報錯)，
+        # 但您可以手動調整這裡的順序，將 'gemini-pro' 移到第一位試試。
         priority_models = [
             'gemini-1.5-flash',
-            'gemini-1.5-flash-latest',
             'gemini-1.5-pro',
-            'gemini-pro'
+            'gemini-pro',         # 最穩定的舊版模型
+            'models/gemini-pro'   # 有些環境需要加 models/ 前綴
         ]
         
-        # 直接回傳設定好的模型物件，實際呼叫時 Library 會處理連線
-        # 這裡預設使用 Flash，若需要切換可修改 index
+        # 這裡預設回傳第一個，若持續報錯，建議手動將 'gemini-pro' 改為 list 的第一個
         return genai.GenerativeModel(priority_models[0])
         
     except Exception as e:
         print(f"Model Init Error: {e}")
         return None
-
-# --- AI 導遊對話 ---
-def ask_ai_guide_stream(prompt, context_data):
-    model = get_gemini_model()
-    if not model:
-        yield "系統提示：請先安裝 google-generativeai 套件並在 secrets.toml 設定 GEMINI_API_KEY。"
-        return
-
-    try:
-        # [優化] 限制 context 長度以免 token 爆量
-        context_str = json.dumps(context_data, ensure_ascii=False)
-        if len(context_str) > 10000: context_str = context_str[:10000] + "..."
-
-        system_prompt = f"""
-        你是一位專業導遊。
-        【使用者行程】：{context_str}
-        請根據行程回答問題，回答請簡潔有力。
-        """
-        
-        history = []
-        if "chat_history" in st.session_state:
-            for msg in st.session_state.chat_history:
-                if msg["role"] == "assistant" and "AI" in msg["content"]: continue
-                # Gemini API role mapping: user -> user, assistant -> model
-                role = "user" if msg["role"] == "user" else "model"
-                history.append({"role": role, "parts": [msg["content"]]})
-        
-        chat = model.start_chat(history=history)
-        response = chat.send_message(system_prompt + "\n使用者：" + prompt, stream=True)
-        for chunk in response:
-            if chunk.text: yield chunk.text
-    except Exception as e:
-        yield f"AI 連線錯誤: {str(e)}"
 
 # --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
@@ -133,12 +98,16 @@ def get_ai_step_advice_stream(item, country):
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        yield f"連線錯誤: {str(e)}"
+        # [優化] 捕捉錯誤並顯示較友善的訊息
+        err_msg = str(e)
+        if "404" in err_msg:
+            yield "⚠️ 模型連線錯誤 (404)。請嘗試更新 google-generativeai 套件或更換模型名稱。"
+        else:
+            yield f"連線錯誤: {err_msg}"
 
-# --- [修正] 收據分析 (增強 JSON 解析能力) ---
+# --- 收據分析 ---
 def analyze_receipt_image(image_file):
     model = get_gemini_model()
-    # 預設回傳
     default_res = [{"name": "分析失敗", "price": 0}]
     
     if not model:
@@ -151,20 +120,17 @@ def analyze_receipt_image(image_file):
         response = model.generate_content([prompt, img])
         text = response.text.strip()
         
-        # [修正] 使用 Regex 尋找 JSON Array，避免 Markdown 干擾
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
             json_str = match.group(0)
             data = json.loads(json_str)
             return data if isinstance(data, list) else default_res
         else:
-            # Fallback: 暴力清理
             text = text.replace("```json", "").replace("```", "").strip()
             data = json.loads(text)
             return data if isinstance(data, list) else default_res
             
-    except Exception as e:
-        print(f"OCR Error: {e}")
+    except Exception:
         return default_res
 
 # --- 雲端連線 ---
@@ -172,11 +138,9 @@ def get_cloud_connection():
     if not CLOUD_AVAILABLE: return None
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        # 優先讀取 st.secrets
         if "gcp_service_account" in st.secrets:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         else:
-            # 本機開發讀取檔案
             creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
         client = gspread.authorize(creds)
         return client
@@ -186,7 +150,6 @@ def save_to_cloud(json_str):
     client = get_cloud_connection()
     if client:
         try:
-            # [提醒] 請確認 Google Sheet 名稱是否正確，並已共用給 Service Account Email
             sheet = client.open("TripPlanDB").sheet1 
             sheet.update_cell(1, 1, json_str)
             return True, "儲存成功！"
@@ -201,20 +164,6 @@ def load_from_cloud():
             return sheet.cell(1, 1).value
         except: return None
     return None
-
-class WeatherService:
-    WEATHER_ICONS = {"Sunny": "☀️", "Cloudy": "☁️", "Rainy": "🌧️", "Snowy": "❄️"}
-    @staticmethod
-    def get_forecast(location, date_obj):
-        # 簡單模擬：用地點+日期當種子，讓每次重新整理天氣一致
-        seed_str = f"{location}{date_obj.strftime('%Y%m%d')}"
-        random.seed(seed_str)
-        base_temp = 20 if date_obj.month not in [12,1,2] else 5
-        high = base_temp + random.randint(0, 5)
-        low = base_temp - random.randint(3, 8)
-        cond = random.choice(["Sunny", "Cloudy", "Rainy"])
-        desc_map = {"Sunny": "晴時多雲", "Cloudy": "陰天", "Rainy": "有雨", "Snowy": "降雪"}
-        return {"high": high, "low": low, "icon": WeatherService.WEATHER_ICONS[cond], "desc": desc_map.get(cond, cond), "raw": cond}
 
 def generate_google_nav_link(origin, dest, mode="transit"):
     if not origin or not dest: return "#"
@@ -238,7 +187,7 @@ def process_excel_upload(uploaded_file):
         st.session_state.trip_days_count = max(new_trip_data.keys())
         st.rerun()
     except Exception as e: 
-        st.error(f"匯入失敗：{e} (請確認是否安裝 openpyxl 以及 Excel 格式正確)")
+        st.error(f"匯入失敗：{e}")
 
 # -------------------------------------
 # 3. 初始化 & 資料
@@ -257,20 +206,12 @@ if "wishlist" not in st.session_state:
     ]
 if "shopping_list" not in st.session_state:
     st.session_state.shopping_list = pd.DataFrame(columns=["對象", "商品名稱", "預算(¥)", "已購買"])
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
 
 # Live 進度追蹤專用變數
 if "current_step_index" not in st.session_state:
     st.session_state.current_step_index = 0
 if "ai_advice_cache" not in st.session_state:
     st.session_state.ai_advice_cache = {} 
-
-# 用來觸發快速按鈕的 AI 請求
-if "trigger_ai" not in st.session_state:
-    st.session_state.trigger_ai = False
-if "trigger_query" not in st.session_state:
-    st.session_state.trigger_query = ""
 
 default_checklist = {
     "必要證件": {"護照": False, "機票證明": False, "Visit Japan Web": False, "日幣現金": False},
@@ -312,26 +253,6 @@ if "hotel_info" not in st.session_state:
         {"id": 1, "name": "KOKO HOTEL 京都", "range": "D1-D3 (3泊)", "date": "1/17 - 1/19", "addr": "京都府京都市...", "link": ""},
         {"id": 2, "name": "相鐵 FRESA INN 大阪", "range": "D4-D5 (2泊)", "date": "1/20 - 1/21", "addr": "大阪府大阪市...", "link": ""}
     ]
-
-TRANSPORT_OPTIONS = ["🚆 電車", "🚌 巴士", "🚶 步行", "🚕 計程車", "🚗 自駕", "🚢 船", "✈️ 飛機"]
-
-SURVIVAL_PHRASES = {
-    "日本": {
-        "招呼": [("你好", "こんにちは"), ("謝謝", "ありがとう"), ("不好意思", "すみません")],
-        "點餐": [("請給我這個", "これをください"), ("買單", "お会計お願いします")],
-        "交通": [("...在哪裡？", "…はどこですか？"), ("車站", "駅"), ("廁所", "トイレ")]
-    },
-    "韓國": {
-        "招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다")],
-        "點餐": [("請給我這個", "이거 주세요"), ("買單", "계산해 주세요")],
-        "交通": [("...在哪裡？", "... 어디에요?"), ("洗手間", "화장실")]
-    },
-    "泰國": {
-        "招呼": [("你好", "Sawasdee"), ("謝謝", "Khop khun")],
-        "點餐": [("我要這個", "Ao an nee"), ("多少錢", "Tao rai?")],
-        "交通": [("去...", "Bai ..."), ("廁所", "Hong nam")]
-    }
-}
 
 # -------------------------------------
 # 4. CSS 樣式 (美化版)
@@ -467,8 +388,8 @@ with st.expander("⚙️ 設定"):
 for d in range(1, st.session_state.trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
-# Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🚀 進行中", "📅 行程", "✨ 願望", "🎒 清單", "ℹ️ 資訊", "🧰 工具", "🤖 導遊"])
+# Tabs (Removed Guide Tab)
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚀 進行中", "📅 行程", "✨ 願望", "🎒 清單", "ℹ️ 資訊", "🧰 工具"])
 
 # ==========================================
 # 1. 🚀 進行中
@@ -810,56 +731,3 @@ with tab6:
                 time.sleep(1)
                 st.rerun()
         else: st.error("缺少雲端套件 (gspread)")
-
-# ==========================================
-# 7. AI 導遊
-# ==========================================
-with tab7:
-    st.header("🤖 AI 隨身導遊")
-    
-    if "trigger_ai" not in st.session_state: st.session_state.trigger_ai = False
-    if "trigger_query" not in st.session_state: st.session_state.trigger_query = ""
-
-    col_head_1, col_head_2 = st.columns([4, 1])
-    if col_head_2.button("🗑️ 清除"):
-        st.session_state.chat_history = [{"role": "assistant", "content": "你好！我是你的 AI 專業導遊。"}]
-        st.rerun()
-
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
-            
-    if st.session_state.trigger_ai:
-        prompt = st.session_state.trigger_query
-        st.session_state.trigger_ai = False
-        st.session_state.trigger_query = ""
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.write(prompt)
-        with st.chat_message("assistant"):
-            context = {"country": st.session_state.target_country, "trip": st.session_state.trip_data}
-            resp = st.write_stream(ask_ai_guide_stream(prompt, context))
-        st.session_state.chat_history.append({"role": "assistant", "content": resp})
-        st.rerun()
-
-    if prompt := st.chat_input("問我行程..."):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.write(prompt)
-        with st.chat_message("assistant"):
-            context = {"country": st.session_state.target_country, "trip": st.session_state.trip_data}
-            resp = st.write_stream(ask_ai_guide_stream(prompt, context))
-        st.session_state.chat_history.append({"role": "assistant", "content": resp})
-
-    st.markdown("---")
-    c1, c2, c3 = st.columns(3)
-    if c1.button("📅 檢視行程"):
-        st.session_state.trigger_query = "檢查行程順暢度"
-        st.session_state.trigger_ai = True
-        st.rerun()
-    if c2.button("🍜 美食推薦"):
-        st.session_state.trigger_query = "推薦附近美食"
-        st.session_state.trigger_ai = True
-        st.rerun()
-    if c3.button("⚠️ 注意事項"):
-        st.session_state.trigger_query = "旅遊注意事項"
-        st.session_state.trigger_ai = True
-        st.rerun()
