@@ -50,7 +50,7 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- [修正] 自動取得可用的 Gemini 模型 (已更新為您的模型清單) ---
+# --- [修正] 自動取得可用的 Gemini 模型 ---
 def get_gemini_model():
     """自動偵測並回傳一個可用的 GenerativeModel 物件"""
     if not GEMINI_AVAILABLE:
@@ -62,19 +62,16 @@ def get_gemini_model():
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # [更新] 根據您提供的清單，將新版模型排在最前面
-        # 這樣程式會優先嘗試使用這些模型，解決 404 問題
+        # 優先順序清單 (包含您可用的 2.0/2.5 系列)
         priority_models = [
-            'gemini-2.0-flash',       # 首選：最新且快速
-            'gemini-2.5-flash',       # 次選
-            'gemini-2.5-pro',         # 強大版本
-            'gemini-2.0-flash-lite',  # 輕量版
-            'gemini-1.5-flash',       # 舊版備用 (若新版暫時無法連線)
-            'gemini-pro'              # 最舊版備用
+            'gemini-2.0-flash',
+            'gemini-2.5-flash',
+            'gemini-2.5-pro',
+            'gemini-2.0-flash-lite',
+            'gemini-1.5-flash',
+            'gemini-pro'
         ]
         
-        # 這裡直接建立模型物件，實際發送請求時才會驗證是否可用
-        # 我們優先使用清單中的第一個 ('gemini-2.0-flash')
         return genai.GenerativeModel(priority_models[0])
         
     except Exception as e:
@@ -100,7 +97,6 @@ def get_ai_step_advice_stream(item, country):
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        # [優化] 錯誤捕捉
         err_msg = str(e)
         if "404" in err_msg:
             yield "⚠️ 錯誤 404：找不到模型。請檢查 API Key 權限或稍後再試。"
@@ -117,7 +113,6 @@ def analyze_receipt_image(image_file):
         
     try:
         img = Image.open(image_file)
-        # 針對 Flash 模型優化 Prompt
         prompt = "你是一個收據辨識助手。請分析這張圖片，列出商品名稱與金額(整數)。請排除小計、稅金、合計。請務必直接回傳一個 JSON Array，不要包含 ```json 或其他文字。格式範例：[{'name':'商品A', 'price':100}, {'name':'商品B', 'price':500}]"
         
         response = model.generate_content([prompt, img])
@@ -202,6 +197,8 @@ if "trip_days_count" not in st.session_state: st.session_state.trip_days_count =
 if "target_country" not in st.session_state: st.session_state.target_country = "日本"
 if "selected_theme_name" not in st.session_state: st.session_state.selected_theme_name = "⛩️ 京都緋紅 (預設)"
 if "start_date" not in st.session_state: st.session_state.start_date = datetime(2026, 1, 17)
+# [新增] 控制是否顯示 AI 介紹的變數
+if "show_ai_intro" not in st.session_state: st.session_state.show_ai_intro = True
 
 if "wishlist" not in st.session_state:
     st.session_state.wishlist = [
@@ -376,6 +373,9 @@ st.markdown(f'<div style="font-size:2.2rem; font-weight:900; text-align:center; 
 
 with st.expander("⚙️ 設定"):
     st.session_state.trip_title = st.text_input("標題", value=st.session_state.trip_title)
+    # [新增] AI 介紹開關
+    st.session_state.show_ai_intro = st.toggle("🤖 顯示 AI 行程介紹", value=st.session_state.show_ai_intro)
+    
     theme_name = st.selectbox("主題", list(THEMES.keys()), index=list(THEMES.keys()).index(st.session_state.selected_theme_name))
     if theme_name != st.session_state.selected_theme_name:
         st.session_state.selected_theme_name = theme_name
@@ -488,22 +488,23 @@ with tab1:
                     for ex in real_item['expenses']:
                         st.text(f"{ex['name']} : ¥{ex['price']:,}")
 
-        # AI 建議
-        st.markdown("### ✨ AI 即時建議")
-        item_id = curr['id']
-        if item_id not in st.session_state.ai_advice_cache:
-            with st.spinner("🤖 導遊正在分析..."):
-                resp = ""
-                ph = st.empty()
-                for chunk in get_ai_step_advice_stream(curr, st.session_state.target_country):
-                    resp += chunk
-                    ph.markdown(f"<div class='ai-box'>{resp}</div>", unsafe_allow_html=True)
-                st.session_state.ai_advice_cache[item_id] = resp
-        else:
-            st.markdown(f"<div class='ai-box'>{st.session_state.ai_advice_cache[item_id]}</div>", unsafe_allow_html=True)
-            if st.button("🔄 重新生成"):
-                del st.session_state.ai_advice_cache[item_id]
-                st.rerun()
+        # [修改] 根據開關決定是否顯示 AI 建議
+        if st.session_state.show_ai_intro:
+            st.markdown("### ✨ AI 即時建議")
+            item_id = curr['id']
+            if item_id not in st.session_state.ai_advice_cache:
+                with st.spinner("🤖 導遊正在分析..."):
+                    resp = ""
+                    ph = st.empty()
+                    for chunk in get_ai_step_advice_stream(curr, st.session_state.target_country):
+                        resp += chunk
+                        ph.markdown(f"<div class='ai-box'>{resp}</div>", unsafe_allow_html=True)
+                    st.session_state.ai_advice_cache[item_id] = resp
+            else:
+                st.markdown(f"<div class='ai-box'>{st.session_state.ai_advice_cache[item_id]}</div>", unsafe_allow_html=True)
+                if st.button("🔄 重新生成"):
+                    del st.session_state.ai_advice_cache[item_id]
+                    st.rerun()
 
         st.markdown("---")
         c_back, c_next = st.columns([1, 2])
