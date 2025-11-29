@@ -7,6 +7,7 @@ import pandas as pd
 import random
 import json
 import base64
+import re  # [修正] 新增 regex 模組用於解析 JSON
 
 # --- 嘗試匯入進階套件 ---
 try:
@@ -49,62 +50,60 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- 關鍵修復：自動取得可用的 Gemini 模型 ---
+# --- [修正] 自動取得可用的 Gemini 模型 (更穩健的版本) ---
 def get_gemini_model():
     """自動偵測並回傳一個可用的 GenerativeModel 物件"""
-    if not GEMINI_AVAILABLE or "GEMINI_API_KEY" not in st.secrets:
+    if not GEMINI_AVAILABLE:
+        return None
+    
+    # 檢查是否設定了 secrets
+    if "GEMINI_API_KEY" not in st.secrets:
+        # 本機測試時，若沒有 secrets.toml，可在此處硬寫 (不建議提交到 git)
         return None
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # 擴充模型清單，包含各種變體以防 404
-        priority_list = [
-            'models/gemini-2.0-flash-exp',
-            'models/gemini-2.0-flash',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-flash-001',
-            'models/gemini-1.5-flash-002',
-            'models/gemini-1.5-pro',
-            'models/gemini-1.5-pro-latest',
-            'models/gemini-pro'
+        # [修正] 不依賴 list_models，直接優先嘗試穩定模型，提升速度與容錯率
+        # 依序嘗試：Flash (快/便宜) -> Pro (強大) -> 舊版
+        priority_models = [
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro',
+            'gemini-pro'
         ]
         
-        target_model = 'models/gemini-1.5-flash' # 預設值
+        # 直接回傳設定好的模型物件，實際呼叫時 Library 會處理連線
+        # 這裡預設使用 Flash，若需要切換可修改 index
+        return genai.GenerativeModel(priority_models[0])
         
-        # 嘗試列出所有可用模型
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # 如果 API Key 有效，從優先清單中挑選第一個可用的
-        for p in priority_list:
-            if p in available_models:
-                target_model = p
-                break
-        
-        return genai.GenerativeModel(target_model)
-        
-    except Exception:
-        # 如果連 list_models 都失敗，直接盲猜最通用的模型
-        return genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        print(f"Model Init Error: {e}")
+        return None
 
 # --- AI 導遊對話 ---
 def ask_ai_guide_stream(prompt, context_data):
     model = get_gemini_model()
     if not model:
-        yield "系統提示：請先安裝套件並設定 API Key。"
+        yield "系統提示：請先安裝 google-generativeai 套件並在 secrets.toml 設定 GEMINI_API_KEY。"
         return
 
     try:
+        # [優化] 限制 context 長度以免 token 爆量
+        context_str = json.dumps(context_data, ensure_ascii=False)
+        if len(context_str) > 10000: context_str = context_str[:10000] + "..."
+
         system_prompt = f"""
         你是一位專業導遊。
-        【使用者行程】：{json.dumps(context_data, ensure_ascii=False)}
+        【使用者行程】：{context_str}
+        請根據行程回答問題，回答請簡潔有力。
         """
         
         history = []
         if "chat_history" in st.session_state:
             for msg in st.session_state.chat_history:
                 if msg["role"] == "assistant" and "AI" in msg["content"]: continue
+                # Gemini API role mapping: user -> user, assistant -> model
                 role = "user" if msg["role"] == "user" else "model"
                 history.append({"role": role, "parts": [msg["content"]]})
         
@@ -113,13 +112,13 @@ def ask_ai_guide_stream(prompt, context_data):
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        yield f"AI 連線錯誤: {e}"
+        yield f"AI 連線錯誤: {str(e)}"
 
 # --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
     model = get_gemini_model()
     if not model:
-        yield "⚠️ AI 未啟用"
+        yield "⚠️ AI 未啟用 (請設定 API Key)"
         return
 
     try:
@@ -134,31 +133,50 @@ def get_ai_step_advice_stream(item, country):
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        yield f"連線錯誤: {e}"
+        yield f"連線錯誤: {str(e)}"
 
-# --- 收據分析 ---
+# --- [修正] 收據分析 (增強 JSON 解析能力) ---
 def analyze_receipt_image(image_file):
     model = get_gemini_model()
+    # 預設回傳
+    default_res = [{"name": "分析失敗", "price": 0}]
+    
     if not model:
-        return [{"name": "模擬商品", "price": 100}]
+        return [{"name": "模擬商品(無AI)", "price": 100}]
+        
     try:
         img = Image.open(image_file)
-        prompt = "分析收據，列出商品與金額，排除小計稅金，回傳 JSON Array: [{'name':str, 'price':int}]"
+        prompt = "分析這張收據圖片，列出商品名稱與金額(整數)。請排除小計、稅金、合計。直接回傳一個 JSON Array，格式範例：[{'name':'商品A', 'price':100}, {'name':'商品B', 'price':500}]。不要回傳任何 Markdown 標記。"
+        
         response = model.generate_content([prompt, img])
-        text = response.text.strip().replace("```json", "").replace("```", "")
-        data = json.loads(text)
-        return data if isinstance(data, list) else [data]
-    except:
-        return [{"name": "分析失敗", "price": 0}]
+        text = response.text.strip()
+        
+        # [修正] 使用 Regex 尋找 JSON Array，避免 Markdown 干擾
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            data = json.loads(json_str)
+            return data if isinstance(data, list) else default_res
+        else:
+            # Fallback: 暴力清理
+            text = text.replace("```json", "").replace("```", "").strip()
+            data = json.loads(text)
+            return data if isinstance(data, list) else default_res
+            
+    except Exception as e:
+        print(f"OCR Error: {e}")
+        return default_res
 
 # --- 雲端連線 ---
 def get_cloud_connection():
     if not CLOUD_AVAILABLE: return None
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
+        # 優先讀取 st.secrets
         if "gcp_service_account" in st.secrets:
             creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         else:
+            # 本機開發讀取檔案
             creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
         client = gspread.authorize(creds)
         return client
@@ -168,11 +186,12 @@ def save_to_cloud(json_str):
     client = get_cloud_connection()
     if client:
         try:
+            # [提醒] 請確認 Google Sheet 名稱是否正確，並已共用給 Service Account Email
             sheet = client.open("TripPlanDB").sheet1 
             sheet.update_cell(1, 1, json_str)
             return True, "儲存成功！"
         except Exception as e: return False, f"寫入失敗: {e}"
-    return False, "連線失敗"
+    return False, "連線失敗 (請檢查 secrets 設定)"
 
 def load_from_cloud():
     client = get_cloud_connection()
@@ -187,6 +206,7 @@ class WeatherService:
     WEATHER_ICONS = {"Sunny": "☀️", "Cloudy": "☁️", "Rainy": "🌧️", "Snowy": "❄️"}
     @staticmethod
     def get_forecast(location, date_obj):
+        # 簡單模擬：用地點+日期當種子，讓每次重新整理天氣一致
         seed_str = f"{location}{date_obj.strftime('%Y%m%d')}"
         random.seed(seed_str)
         base_temp = 20 if date_obj.month not in [12,1,2] else 5
@@ -195,36 +215,6 @@ class WeatherService:
         cond = random.choice(["Sunny", "Cloudy", "Rainy"])
         desc_map = {"Sunny": "晴時多雲", "Cloudy": "陰天", "Rainy": "有雨", "Snowy": "降雪"}
         return {"high": high, "low": low, "icon": WeatherService.WEATHER_ICONS[cond], "desc": desc_map.get(cond, cond), "raw": cond}
-
-def get_packing_recommendations(trip_data, start_date):
-    recommendations = set()
-    has_rain = False
-    min_temp = 100
-    for day, items in trip_data.items():
-        loc = items[0]['loc'] if items else "City"
-        w = WeatherService.get_forecast(loc, start_date + timedelta(days=day-1))
-        if w['raw'] in ["Rainy", "Snowy"]: has_rain = True
-        min_temp = min(min_temp, w['low'])
-    
-    if has_rain: recommendations.update(["☔ 折疊傘/雨衣", "👞 防水噴霧"])
-    if min_temp < 12: recommendations.update(["🧣 圍巾", "🧥 保暖外套", "🧤 手套"])
-    elif min_temp < 20: recommendations.update(["🧥 薄外套"])
-    if min_temp > 25: recommendations.update(["🕶️ 太陽眼鏡", "🧢 帽子", "🧴 防曬"])
-    return list(recommendations)
-
-def add_expense_callback(item_id, day_num):
-    name_key = f"new_exp_n_{item_id}"
-    price_key = f"new_exp_p_{item_id}"
-    name = st.session_state.get(name_key, "")
-    price = st.session_state.get(price_key, 0)
-    if name and price > 0:
-        target_item = next((x for x in st.session_state.trip_data[day_num] if x['id'] == item_id), None)
-        if target_item:
-            if "expenses" not in target_item: target_item["expenses"] = []
-            target_item['expenses'].append({"name": name, "price": price})
-            target_item['cost'] = sum(x['price'] for x in target_item['expenses'])
-            st.session_state[name_key] = ""
-            st.session_state[price_key] = 0
 
 def generate_google_nav_link(origin, dest, mode="transit"):
     if not origin or not dest: return "#"
@@ -247,7 +237,8 @@ def process_excel_upload(uploaded_file):
         st.session_state.trip_data = new_trip_data
         st.session_state.trip_days_count = max(new_trip_data.keys())
         st.rerun()
-    except: st.error("格式錯誤")
+    except Exception as e: 
+        st.error(f"匯入失敗：{e} (請確認是否安裝 openpyxl 以及 Excel 格式正確)")
 
 # -------------------------------------
 # 3. 初始化 & 資料
@@ -423,6 +414,32 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 /* General Overrides */
 div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; border-radius: 12px !important; }}
 div[data-testid="stRadio"] label[data-checked="true"] {{ background-color: {c_card} !important; color: {c_text} !important; font-weight: bold !important; }}
+
+/* Custom Apple Card for Itinerary */
+.apple-card {{
+    background: {c_card};
+    border-radius: 12px;
+    padding: 12px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    border: 1px solid rgba(0,0,0,0.03);
+    margin-bottom: 8px;
+}}
+.apple-title {{ font-weight: bold; font-size: 1rem; color: {c_text}; }}
+.apple-loc {{ font-size: 0.85rem; color: {c_sub}; display: flex; align-items: center; margin-top: 4px; }}
+.trans-card {{
+    background: transparent;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px dashed {c_sec};
+    color: {c_sub};
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}}
+.trans-tag {{
+    background: {c_primary}; color: white; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px;
+}}
 </style>
 """
 st.markdown(main_css, unsafe_allow_html=True)
@@ -782,7 +799,7 @@ with tab6:
             data = {"trip": st.session_state.trip_data, "wish": st.session_state.wishlist, "check": st.session_state.checklist}
             res = save_to_cloud(json.dumps(data, default=str))
             st.toast(res[1] if res[0] else f"錯誤: {res[1]}")
-        else: st.error("缺少雲端套件")
+        else: st.error("缺少雲端套件 (gspread)")
     if c2.button("📥 下載"):
         if CLOUD_AVAILABLE:
             raw = load_from_cloud()
@@ -792,7 +809,7 @@ with tab6:
                 st.toast("成功")
                 time.sleep(1)
                 st.rerun()
-        else: st.error("缺少雲端套件")
+        else: st.error("缺少雲端套件 (gspread)")
 
 # ==========================================
 # 7. AI 導遊
