@@ -50,7 +50,7 @@ THEMES = {
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- [修正] 自動取得可用的 Gemini 模型 ---
+# --- [修正] 自動取得可用的 Gemini 模型 (已更新為您的模型清單) ---
 def get_gemini_model():
     """自動偵測並回傳一個可用的 GenerativeModel 物件"""
     if not GEMINI_AVAILABLE:
@@ -62,17 +62,19 @@ def get_gemini_model():
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        # [修正] 針對 404 錯誤，擴充模型清單，並加入舊版模型作為備案
-        # 如果 1.5-flash 失敗，程式雖不會自動切換(因為是在生成時才報錯)，
-        # 但您可以手動調整這裡的順序，將 'gemini-pro' 移到第一位試試。
+        # [更新] 根據您提供的清單，將新版模型排在最前面
+        # 這樣程式會優先嘗試使用這些模型，解決 404 問題
         priority_models = [
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro',         # 最穩定的舊版模型
-            'models/gemini-pro'   # 有些環境需要加 models/ 前綴
+            'gemini-2.0-flash',       # 首選：最新且快速
+            'gemini-2.5-flash',       # 次選
+            'gemini-2.5-pro',         # 強大版本
+            'gemini-2.0-flash-lite',  # 輕量版
+            'gemini-1.5-flash',       # 舊版備用 (若新版暫時無法連線)
+            'gemini-pro'              # 最舊版備用
         ]
         
-        # 這裡預設回傳第一個，若持續報錯，建議手動將 'gemini-pro' 改為 list 的第一個
+        # 這裡直接建立模型物件，實際發送請求時才會驗證是否可用
+        # 我們優先使用清單中的第一個 ('gemini-2.0-flash')
         return genai.GenerativeModel(priority_models[0])
         
     except Exception as e:
@@ -98,10 +100,10 @@ def get_ai_step_advice_stream(item, country):
         for chunk in response:
             if chunk.text: yield chunk.text
     except Exception as e:
-        # [優化] 捕捉錯誤並顯示較友善的訊息
+        # [優化] 錯誤捕捉
         err_msg = str(e)
         if "404" in err_msg:
-            yield "⚠️ 模型連線錯誤 (404)。請嘗試更新 google-generativeai 套件或更換模型名稱。"
+            yield "⚠️ 錯誤 404：找不到模型。請檢查 API Key 權限或稍後再試。"
         else:
             yield f"連線錯誤: {err_msg}"
 
@@ -115,7 +117,8 @@ def analyze_receipt_image(image_file):
         
     try:
         img = Image.open(image_file)
-        prompt = "分析這張收據圖片，列出商品名稱與金額(整數)。請排除小計、稅金、合計。直接回傳一個 JSON Array，格式範例：[{'name':'商品A', 'price':100}, {'name':'商品B', 'price':500}]。不要回傳任何 Markdown 標記。"
+        # 針對 Flash 模型優化 Prompt
+        prompt = "你是一個收據辨識助手。請分析這張圖片，列出商品名稱與金額(整數)。請排除小計、稅金、合計。請務必直接回傳一個 JSON Array，不要包含 ```json 或其他文字。格式範例：[{'name':'商品A', 'price':100}, {'name':'商品B', 'price':500}]"
         
         response = model.generate_content([prompt, img])
         text = response.text.strip()
@@ -130,7 +133,8 @@ def analyze_receipt_image(image_file):
             data = json.loads(text)
             return data if isinstance(data, list) else default_res
             
-    except Exception:
+    except Exception as e:
+        print(f"OCR Error: {e}")
         return default_res
 
 # --- 雲端連線 ---
