@@ -46,12 +46,9 @@ THEMES = {
     }
 }
 
-# [新增] 預設匯率對照表 (對台幣)
+# 預設匯率對照表
 DEFAULT_RATES = {
-    "日本": 0.2150,  # 1 JPY = 0.215 TWD
-    "韓國": 0.0235,  # 1 KRW = 0.0235 TWD
-    "泰國": 0.9500,  # 1 THB = 0.95 TWD
-    "台灣": 1.0000   # 1 TWD = 1 TWD
+    "日本": 0.2150, "韓國": 0.0235, "泰國": 0.9500, "台灣": 1.0000
 }
 
 # -------------------------------------
@@ -59,10 +56,8 @@ DEFAULT_RATES = {
 # -------------------------------------
 
 def get_gemini_model():
-    """自動偵測並回傳一個可用的 GenerativeModel 物件"""
     if not GEMINI_AVAILABLE: return None
     if "GEMINI_API_KEY" not in st.secrets: return None
-
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         priority_models = [
@@ -190,7 +185,6 @@ if "wishlist" not in st.session_state:
 if "shopping_list" not in st.session_state:
     st.session_state.shopping_list = pd.DataFrame(columns=["對象", "商品名稱", "預算(¥)", "已購買"])
 
-# Live 進度追蹤專用變數
 if "current_step_index" not in st.session_state:
     st.session_state.current_step_index = 0
 if "ai_advice_cache" not in st.session_state:
@@ -236,6 +230,25 @@ if "hotel_info" not in st.session_state:
         {"id": 1, "name": "KOKO HOTEL 京都", "range": "D1-D3 (3泊)", "date": "1/17 - 1/19", "addr": "京都府京都市...", "link": ""},
         {"id": 2, "name": "相鐵 FRESA INN 大阪", "range": "D4-D5 (2泊)", "date": "1/20 - 1/21", "addr": "大阪府大阪市...", "link": ""}
     ]
+
+# 會話資料庫
+SURVIVAL_PHRASES = {
+    "日本": {
+        "👋 招呼": [("你好", "こんにちは"), ("謝謝", "ありがとう"), ("不好意思", "すみません"), ("是 / 不是", "はい / いいえ")],
+        "🍜 點餐": [("請給我這個", "これをください"), ("多少錢", "いくらですか"), ("結帳", "お会計お願いします"), ("好吃的", "おいしい")],
+        "🚆 交通": [("...在哪裡？", "…はどこですか？"), ("車站", "駅"), ("廁所", "トイレ"), ("請帶我去", "連れて行って")]
+    },
+    "韓國": {
+        "👋 招呼": [("你好", "안녕하세요"), ("謝謝", "감사합니다"), ("對不起", "미안합니다")],
+        "🍜 點餐": [("請給我這個", "이거 주세요"), ("多少錢", "얼마예요?"), ("買單", "계산해 주세요")],
+        "🚆 交通": [("...在哪裡？", "... 어디에요?"), ("洗手間", "화장실"), ("地鐵站", "지하철역")]
+    },
+    "泰國": {
+        "👋 招呼": [("你好", "Sawasdee"), ("謝謝", "Khop khun"), ("對不起", "Kor tod")],
+        "🍜 點餐": [("我要這個", "Ao an nee"), ("多少錢", "Tao rai?"), ("買單", "Check bin")],
+        "🚆 交通": [("去...", "Bai ..."), ("廁所", "Hong nam"), ("這裡", "Tee nee")]
+    }
+}
 
 # -------------------------------------
 # 4. CSS 樣式 (美化版)
@@ -366,18 +379,14 @@ with st.expander("⚙️ 設定"):
     st.session_state.start_date = c1.date_input("日期", value=st.session_state.start_date)
     st.session_state.trip_days_count = c2.number_input("天數", 1, 30, st.session_state.trip_days_count)
     
-    # [修正] 地區選擇與匯率自動更新
     prev_country = st.session_state.target_country
-    # 使用 list.index 找到當前選項的索引，確保 selectbox 預設選中當前值
     country_options = list(DEFAULT_RATES.keys())
     try:
         idx = country_options.index(prev_country)
     except ValueError:
         idx = 0
-        
     new_country = st.selectbox("地區", country_options, index=idx)
     
-    # 若更換國家，自動更新匯率
     if new_country != prev_country:
         st.session_state.target_country = new_country
         st.session_state.exchange_rate = DEFAULT_RATES[new_country]
@@ -385,7 +394,6 @@ with st.expander("⚙️ 設定"):
     else:
         st.session_state.target_country = new_country
 
-    # [修正] 匯率輸入框，增加小數點位數以支援韓幣等小面額貨幣
     st.session_state.exchange_rate = st.number_input(
         f"匯率 (1 {new_country}幣 換算 TWD)", 
         value=float(st.session_state.exchange_rate), 
@@ -400,7 +408,7 @@ with st.expander("⚙️ 設定"):
 for d in range(1, st.session_state.trip_days_count + 1):
     if d not in st.session_state.trip_data: st.session_state.trip_data[d] = []
 
-# Tabs (Removed Guide Tab)
+# Tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚀 進行中", "📅 行程", "✨ 願望", "🎒 清單", "ℹ️ 資訊", "🧰 工具"])
 
 # ==========================================
@@ -427,7 +435,6 @@ with tab1:
     else:
         curr = all_steps[st.session_state.current_step_index]
         real_item = None
-        # 尋找真實 item
         for item in st.session_state.trip_data[curr['day_num']]:
             if item['id'] == curr['id']:
                 real_item = item
@@ -451,7 +458,6 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
         
-        # 記帳區塊
         with st.expander("💰 快速記帳", expanded=False):
             if real_item:
                 input_method = st.radio("方式", ["📸 拍照", "📂 上傳"], horizontal=True, key=f"live_in_{curr['id']}")
@@ -616,59 +622,105 @@ with tab4:
             st.session_state.checklist[category][item] = cols[i % 2].checkbox(item, value=checked)
 
 # ==========================================
-# 5. 資訊
+# 5. 資訊 (可編輯版)
 # ==========================================
 with tab5:
-    st.subheader("✈️ 航班")
+    col_info_head, col_info_edit = st.columns([4, 1])
+    col_info_head.subheader("✈️ 航班")
+    
+    # [新增] 編輯模式開關
+    is_info_edit = col_info_edit.toggle("✏️ 編輯")
+    
     flights = st.session_state.flight_info
     f_out = flights['outbound']
     f_in = flights['inbound']
     
-    st.markdown(f"""
-    <div class="flight-card">
-        <div class="flight-header"><span>DEPARTURE</span><span>{f_out['date']}</span></div>
-        <div class="flight-route">
-            <div class="flight-code">{f_out['dep_loc']}</div>
-            <div class="flight-plane">✈</div>
-            <div class="flight-code">{f_out['arr_loc']}</div>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-weight:bold;">
-            <div>{f_out['dep']}</div>
-            <div>{f_out['code']}</div>
-            <div>{f_out['arr']}</div>
-        </div>
-    </div>
-    <div class="flight-card">
-        <div class="flight-header"><span>RETURN</span><span>{f_in['date']}</span></div>
-        <div class="flight-route">
-            <div class="flight-code">{f_in['dep_loc']}</div>
-            <div class="flight-plane">✈</div>
-            <div class="flight-code">{f_in['arr_loc']}</div>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-weight:bold;">
-            <div>{f_in['dep']}</div>
-            <div>{f_in['code']}</div>
-            <div>{f_in['arr']}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("🏨 住宿")
-    for hotel in st.session_state.hotel_info:
+    if is_info_edit:
+        st.markdown("**去程 (Outbound)**")
+        c1, c2, c3 = st.columns(3)
+        f_out['date'] = c1.text_input("日期", f_out['date'], key="fd_out")
+        f_out['code'] = c2.text_input("班號", f_out['code'], key="fc_out")
+        c1, c2 = st.columns(2)
+        f_out['dep'] = c1.text_input("起飛時間", f_out['dep'], key="ft_d_out")
+        f_out['arr'] = c2.text_input("抵達時間", f_out['arr'], key="ft_a_out")
+        f_out['dep_loc'] = c1.text_input("起飛地", f_out['dep_loc'], key="fl_d_out")
+        f_out['arr_loc'] = c2.text_input("抵達地", f_out['arr_loc'], key="fl_a_out")
+        
+        st.divider()
+        st.markdown("**回程 (Inbound)**")
+        c1, c2, c3 = st.columns(3)
+        f_in['date'] = c1.text_input("日期", f_in['date'], key="fd_in")
+        f_in['code'] = c2.text_input("班號", f_in['code'], key="fc_in")
+        c1, c2 = st.columns(2)
+        f_in['dep'] = c1.text_input("起飛時間", f_in['dep'], key="ft_d_in")
+        f_in['arr'] = c2.text_input("抵達時間", f_in['arr'], key="ft_a_in")
+        f_in['dep_loc'] = c1.text_input("起飛地", f_in['dep_loc'], key="fl_d_in")
+        f_in['arr_loc'] = c2.text_input("抵達地", f_in['arr_loc'], key="fl_a_in")
+    else:
         st.markdown(f"""
-        <div class="hotel-card">
-            <div class="hotel-img-placeholder">🏨</div>
-            <div class="hotel-body">
-                <div class="hotel-name">{hotel['name']}</div>
-                <div class="hotel-meta">
-                    <span class="hotel-badge">{hotel['range']}</span>
-                    <span>{hotel['date']}</span>
-                </div>
-                <div class="hotel-meta" style="margin-top:8px;">📍 {hotel['addr']}</div>
+        <div class="flight-card">
+            <div class="flight-header"><span>DEPARTURE</span><span>{f_out['date']}</span></div>
+            <div class="flight-route">
+                <div class="flight-code">{f_out['dep_loc']}</div>
+                <div class="flight-plane">✈</div>
+                <div class="flight-code">{f_out['arr_loc']}</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-weight:bold;">
+                <div>{f_out['dep']}</div>
+                <div>{f_out['code']}</div>
+                <div>{f_out['arr']}</div>
+            </div>
+        </div>
+        <div class="flight-card">
+            <div class="flight-header"><span>RETURN</span><span>{f_in['date']}</span></div>
+            <div class="flight-route">
+                <div class="flight-code">{f_in['dep_loc']}</div>
+                <div class="flight-plane">✈</div>
+                <div class="flight-code">{f_in['arr_loc']}</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-weight:bold;">
+                <div>{f_in['dep']}</div>
+                <div>{f_in['code']}</div>
+                <div>{f_in['arr']}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+    st.divider()
+    
+    # 飯店區塊
+    st.subheader("🏨 住宿")
+    if is_info_edit:
+        if st.button("➕ 新增飯店"):
+            new_id = len(st.session_state.hotel_info) + 1
+            st.session_state.hotel_info.append({"id": new_id, "name": "新飯店", "range": "", "date": "", "addr": "", "link": ""})
+            st.rerun()
+            
+        for i, hotel in enumerate(st.session_state.hotel_info):
+            with st.expander(f"編輯: {hotel['name']}", expanded=True):
+                hotel['name'] = st.text_input("名稱", hotel['name'], key=f"hn_{i}")
+                c1, c2 = st.columns(2)
+                hotel['range'] = c1.text_input("天數(e.g. D1-D3)", hotel['range'], key=f"hr_{i}")
+                hotel['date'] = c2.text_input("日期", hotel['date'], key=f"hd_{i}")
+                hotel['addr'] = st.text_input("地址", hotel['addr'], key=f"ha_{i}")
+                if st.button("🗑️ 刪除", key=f"hdel_{i}"):
+                    st.session_state.hotel_info.pop(i)
+                    st.rerun()
+    else:
+        for hotel in st.session_state.hotel_info:
+            st.markdown(f"""
+            <div class="hotel-card">
+                <div class="hotel-img-placeholder">🏨</div>
+                <div class="hotel-body">
+                    <div class="hotel-name">{hotel['name']}</div>
+                    <div class="hotel-meta">
+                        <span class="hotel-badge">{hotel['range']}</span>
+                        <span>{hotel['date']}</span>
+                    </div>
+                    <div class="hotel-meta" style="margin-top:8px;">📍 {hotel['addr']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ==========================================
 # 6. 工具
@@ -692,6 +744,27 @@ with tab6:
         tax_free = int(amt / 1.1)
         refund = amt - tax_free
         st.caption(f"🛍️ 免稅價約: {tax_free:,} | 退稅額約: {refund:,}")
+
+    st.divider()
+    
+    # [新增] 旅遊實用會話區塊
+    st.subheader("🗣️ 旅遊實用會話")
+    target_c = st.session_state.target_country
+    
+    if target_c in SURVIVAL_PHRASES:
+        phrases = SURVIVAL_PHRASES[target_c]
+        tabs = st.tabs(list(phrases.keys()))
+        for i, (category, items) in enumerate(phrases.items()):
+            with tabs[i]:
+                for zh, local in items:
+                    st.markdown(f"""
+                    <div style="background:{c_bg}; border:1px solid {c_sec}; padding:12px; border-radius:10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:bold; color:{c_text};">{zh}</span>
+                        <span style="color:{c_primary}; font-weight:bold; font-size:1.1rem;">{local}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+    else:
+        st.info("目前僅支援 日/韓/泰 地區的會話")
 
     st.divider()
     
