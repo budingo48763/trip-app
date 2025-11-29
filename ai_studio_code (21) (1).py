@@ -46,7 +46,6 @@ THEMES = {
     }
 }
 
-# 預設匯率對照表
 DEFAULT_RATES = {
     "日本": 0.2150, "韓國": 0.0235, "泰國": 0.9500, "台灣": 1.0000
 }
@@ -88,6 +87,30 @@ def get_ai_step_advice_stream(item, country):
         err_msg = str(e)
         if "404" in err_msg: yield "⚠️ 錯誤 404：找不到模型。"
         else: yield f"連線錯誤: {err_msg}"
+
+# [新增] AI 解析願望清單文字
+def parse_wishlist_text(raw_text):
+    model = get_gemini_model()
+    if not model: return None
+    try:
+        prompt = f"""
+        請分析以下文字（可能是 Google Maps 分享連結、Tabelog 店名、或一段網誌介紹），提取出旅遊景點資訊。
+        文字內容：{raw_text}
+        
+        請回傳一個 JSON 物件 (Object)，包含以下欄位：
+        - title: 景點或餐廳名稱
+        - loc: 地址或大概區域 (如果沒有，留空)
+        - note: 簡短的描述或評價 (從文字中摘要)
+        
+        只回傳 JSON，不要有 Markdown。
+        """
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(text)
+    except Exception as e:
+        print(f"Wishlist Parse Error: {e}")
+        return None
 
 def analyze_receipt_image(image_file):
     model = get_gemini_model()
@@ -231,7 +254,6 @@ if "hotel_info" not in st.session_state:
         {"id": 2, "name": "相鐵 FRESA INN 大阪", "range": "D4-D5 (2泊)", "date": "1/20 - 1/21", "addr": "大阪府大阪市...", "link": ""}
     ]
 
-# 會話資料庫
 SURVIVAL_PHRASES = {
     "日本": {
         "👋 招呼": [("你好", "こんにちは"), ("謝謝", "ありがとう"), ("不好意思", "すみません"), ("是 / 不是", "はい / いいえ")],
@@ -588,14 +610,37 @@ with tab2:
 # 3. 願望清單
 # ==========================================
 with tab3:
-    st.subheader("✨ 願望清單")
-    with st.expander("➕ 新增", expanded=False):
+    col_wish_1, col_wish_2 = st.columns([2, 1])
+    col_wish_1.subheader("✨ 願望清單")
+    
+    # [新增] AI 智能匯入
+    with col_wish_2.popover("⚡ 智能貼上"):
+        st.markdown("複製 Google Maps 連結或 Tabelog/網誌文字，AI 自動分析！")
+        raw_text = st.text_area("貼上文字...", height=100)
+        if st.button("🪄 AI 解析加入"):
+            with st.spinner("AI 正在閱讀中..."):
+                res = parse_wishlist_text(raw_text)
+                if res and 'title' in res:
+                    st.session_state.wishlist.append({
+                        "id": int(time.time()), 
+                        "title": res.get('title', '未命名'), 
+                        "loc": res.get('loc', ''), 
+                        "note": res.get('note', '')
+                    })
+                    st.success("成功加入！")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("解析失敗，請重試")
+
+    with st.expander("➕ 手動新增", expanded=False):
         w_title = st.text_input("名稱")
         w_loc = st.text_input("地點")
         w_note = st.text_input("備註")
         if st.button("加入") and w_title:
             st.session_state.wishlist.append({"id": int(time.time()), "title": w_title, "loc": w_loc, "note": w_note})
             st.rerun()
+
     for i, wish in enumerate(st.session_state.wishlist):
         with st.container():
             st.markdown(f"""<div class="apple-card" style="padding:15px; margin-bottom:10px; border-left:4px solid {c_primary};"><div style="font-weight:bold; font-size:1.1rem;">{wish['title']}</div><div style="font-size:0.9rem; color:{c_sub};">📍 {wish['loc']}｜📝 {wish['note']}</div></div>""", unsafe_allow_html=True)
@@ -611,15 +656,58 @@ with tab3:
                 st.rerun()
 
 # ==========================================
-# 4. 準備清單
+# 4. 準備清單 (可編輯版)
 # ==========================================
 with tab4:
-    st.subheader("🎒 準備清單")
-    for category, items in st.session_state.checklist.items():
-        st.markdown(f"**{category}**")
-        cols = st.columns(2)
-        for i, (item, checked) in enumerate(items.items()):
-            st.session_state.checklist[category][item] = cols[i % 2].checkbox(item, value=checked)
+    col_check_1, col_check_2 = st.columns([4, 1])
+    col_check_1.subheader("🎒 準備清單")
+    is_check_edit = col_check_2.toggle("✏️ 編輯")
+
+    if is_check_edit:
+        # 新增分類
+        new_cat = st.text_input("➕ 新增分類名稱")
+        if st.button("新增分類") and new_cat:
+            if new_cat not in st.session_state.checklist:
+                st.session_state.checklist[new_cat] = {}
+                st.rerun()
+        
+        st.divider()
+
+    # 顯示清單
+    # 為了避免在迴圈中刪除字典鍵值出錯，先轉換成 list
+    categories = list(st.session_state.checklist.keys())
+    
+    for category in categories:
+        items = st.session_state.checklist[category]
+        
+        if is_check_edit:
+            c_head_1, c_head_2 = st.columns([4, 1])
+            c_head_1.markdown(f"**📂 {category}**")
+            if c_head_2.button("🗑️", key=f"del_cat_{category}"):
+                del st.session_state.checklist[category]
+                st.rerun()
+                
+            # 新增項目
+            new_item_txt = st.text_input(f"在「{category}」新增項目", key=f"new_item_{category}")
+            if st.button("加入項目", key=f"add_btn_{category}") and new_item_txt:
+                st.session_state.checklist[category][new_item_txt] = False
+                st.rerun()
+
+            # 編輯現有項目
+            item_keys = list(items.keys())
+            for item in item_keys:
+                c_i_1, c_i_2 = st.columns([4, 1])
+                c_i_1.text(f" - {item}")
+                if c_i_2.button("❌", key=f"del_i_{category}_{item}"):
+                    del st.session_state.checklist[category][item]
+                    st.rerun()
+            st.divider()
+            
+        else:
+            st.markdown(f"**{category}**")
+            cols = st.columns(2)
+            for i, (item, checked) in enumerate(items.items()):
+                st.session_state.checklist[category][item] = cols[i % 2].checkbox(item, value=checked)
 
 # ==========================================
 # 5. 資訊 (可編輯版)
@@ -628,7 +716,6 @@ with tab5:
     col_info_head, col_info_edit = st.columns([4, 1])
     col_info_head.subheader("✈️ 航班")
     
-    # [新增] 編輯模式開關
     is_info_edit = col_info_edit.toggle("✏️ 編輯")
     
     flights = st.session_state.flight_info
@@ -688,7 +775,6 @@ with tab5:
 
     st.divider()
     
-    # 飯店區塊
     st.subheader("🏨 住宿")
     if is_info_edit:
         if st.button("➕ 新增飯店"):
@@ -747,7 +833,6 @@ with tab6:
 
     st.divider()
     
-    # [新增] 旅遊實用會話區塊
     st.subheader("🗣️ 旅遊實用會話")
     target_c = st.session_state.target_country
     
