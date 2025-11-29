@@ -46,51 +46,44 @@ THEMES = {
     }
 }
 
+# [新增] 預設匯率對照表 (對台幣)
+DEFAULT_RATES = {
+    "日本": 0.2150,  # 1 JPY = 0.215 TWD
+    "韓國": 0.0235,  # 1 KRW = 0.0235 TWD
+    "泰國": 0.9500,  # 1 THB = 0.95 TWD
+    "台灣": 1.0000   # 1 TWD = 1 TWD
+}
+
 # -------------------------------------
 # 2. 核心功能函數
 # -------------------------------------
 
-# --- [修正] 自動取得可用的 Gemini 模型 ---
 def get_gemini_model():
     """自動偵測並回傳一個可用的 GenerativeModel 物件"""
-    if not GEMINI_AVAILABLE:
-        return None
-    
-    if "GEMINI_API_KEY" not in st.secrets:
-        return None
+    if not GEMINI_AVAILABLE: return None
+    if "GEMINI_API_KEY" not in st.secrets: return None
 
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        # 優先順序清單 (包含您可用的 2.0/2.5 系列)
         priority_models = [
-            'gemini-2.0-flash',
-            'gemini-2.5-flash',
-            'gemini-2.5-pro',
-            'gemini-2.0-flash-lite',
-            'gemini-1.5-flash',
-            'gemini-pro'
+            'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro',
+            'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-pro'
         ]
-        
         return genai.GenerativeModel(priority_models[0])
-        
     except Exception as e:
         print(f"Model Init Error: {e}")
         return None
 
-# --- AI 針對單一行程的建議 ---
 def get_ai_step_advice_stream(item, country):
     model = get_gemini_model()
     if not model:
         yield "⚠️ AI 未啟用 (請設定 API Key)"
         return
-
     try:
         prompt = f"""
         使用者正在 {country} 旅遊。
         當下行程：{item['title']} (地點: {item['loc']})
         備註：{item['note']}
-        
         請提供約 100 字的簡短建議(注意事項、看點或美食)。
         """
         response = model.generate_content(prompt, stream=True)
@@ -98,26 +91,18 @@ def get_ai_step_advice_stream(item, country):
             if chunk.text: yield chunk.text
     except Exception as e:
         err_msg = str(e)
-        if "404" in err_msg:
-            yield "⚠️ 錯誤 404：找不到模型。請檢查 API Key 權限或稍後再試。"
-        else:
-            yield f"連線錯誤: {err_msg}"
+        if "404" in err_msg: yield "⚠️ 錯誤 404：找不到模型。"
+        else: yield f"連線錯誤: {err_msg}"
 
-# --- 收據分析 ---
 def analyze_receipt_image(image_file):
     model = get_gemini_model()
     default_res = [{"name": "分析失敗", "price": 0}]
-    
-    if not model:
-        return [{"name": "模擬商品(無AI)", "price": 100}]
-        
+    if not model: return [{"name": "模擬商品(無AI)", "price": 100}]
     try:
         img = Image.open(image_file)
         prompt = "你是一個收據辨識助手。請分析這張圖片，列出商品名稱與金額(整數)。請排除小計、稅金、合計。請務必直接回傳一個 JSON Array，不要包含 ```json 或其他文字。格式範例：[{'name':'商品A', 'price':100}, {'name':'商品B', 'price':500}]"
-        
         response = model.generate_content([prompt, img])
         text = response.text.strip()
-        
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
             json_str = match.group(0)
@@ -127,12 +112,10 @@ def analyze_receipt_image(image_file):
             text = text.replace("```json", "").replace("```", "").strip()
             data = json.loads(text)
             return data if isinstance(data, list) else default_res
-            
     except Exception as e:
         print(f"OCR Error: {e}")
         return default_res
 
-# --- 雲端連線 ---
 def get_cloud_connection():
     if not CLOUD_AVAILABLE: return None
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -197,7 +180,6 @@ if "trip_days_count" not in st.session_state: st.session_state.trip_days_count =
 if "target_country" not in st.session_state: st.session_state.target_country = "日本"
 if "selected_theme_name" not in st.session_state: st.session_state.selected_theme_name = "⛩️ 京都緋紅 (預設)"
 if "start_date" not in st.session_state: st.session_state.start_date = datetime(2026, 1, 17)
-# [新增] 控制是否顯示 AI 介紹的變數
 if "show_ai_intro" not in st.session_state: st.session_state.show_ai_intro = True
 
 if "wishlist" not in st.session_state:
@@ -373,18 +355,44 @@ st.markdown(f'<div style="font-size:2.2rem; font-weight:900; text-align:center; 
 
 with st.expander("⚙️ 設定"):
     st.session_state.trip_title = st.text_input("標題", value=st.session_state.trip_title)
-    # [新增] AI 介紹開關
     st.session_state.show_ai_intro = st.toggle("🤖 顯示 AI 行程介紹", value=st.session_state.show_ai_intro)
     
     theme_name = st.selectbox("主題", list(THEMES.keys()), index=list(THEMES.keys()).index(st.session_state.selected_theme_name))
     if theme_name != st.session_state.selected_theme_name:
         st.session_state.selected_theme_name = theme_name
         st.rerun()
+        
     c1, c2 = st.columns(2)
     st.session_state.start_date = c1.date_input("日期", value=st.session_state.start_date)
     st.session_state.trip_days_count = c2.number_input("天數", 1, 30, st.session_state.trip_days_count)
-    st.session_state.target_country = st.selectbox("地區", ["日本", "韓國", "泰國", "台灣"])
-    st.session_state.exchange_rate = st.number_input("匯率", value=st.session_state.exchange_rate, step=0.01)
+    
+    # [修正] 地區選擇與匯率自動更新
+    prev_country = st.session_state.target_country
+    # 使用 list.index 找到當前選項的索引，確保 selectbox 預設選中當前值
+    country_options = list(DEFAULT_RATES.keys())
+    try:
+        idx = country_options.index(prev_country)
+    except ValueError:
+        idx = 0
+        
+    new_country = st.selectbox("地區", country_options, index=idx)
+    
+    # 若更換國家，自動更新匯率
+    if new_country != prev_country:
+        st.session_state.target_country = new_country
+        st.session_state.exchange_rate = DEFAULT_RATES[new_country]
+        st.rerun()
+    else:
+        st.session_state.target_country = new_country
+
+    # [修正] 匯率輸入框，增加小數點位數以支援韓幣等小面額貨幣
+    st.session_state.exchange_rate = st.number_input(
+        f"匯率 (1 {new_country}幣 換算 TWD)", 
+        value=float(st.session_state.exchange_rate), 
+        step=0.001, 
+        format="%.4f"
+    )
+    
     uf = st.file_uploader("匯入 Excel", type=["xlsx"])
     if uf and st.button("匯入"): process_excel_upload(uf)
 
@@ -488,7 +496,6 @@ with tab1:
                     for ex in real_item['expenses']:
                         st.text(f"{ex['name']} : ¥{ex['price']:,}")
 
-        # [修改] 根據開關決定是否顯示 AI 建議
         if st.session_state.show_ai_intro:
             st.markdown("### ✨ AI 即時建議")
             item_id = curr['id']
