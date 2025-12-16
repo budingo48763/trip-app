@@ -50,66 +50,7 @@ DEFAULT_RATES = {
     "日本": 0.2150, "韓國": 0.0235, "泰國": 0.9500, "台灣": 1.0000
 }
 
-# -------------------------------------
-# 2. 核心功能函數
-# -------------------------------------
 
-def get_gemini_model():
-    if not GEMINI_AVAILABLE: return None
-    if "GEMINI_API_KEY" not in st.secrets: return None
-    try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        priority_models = [
-            'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro',
-            'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-pro'
-        ]
-        return genai.GenerativeModel(priority_models[0])
-    except Exception as e:
-        print(f"Model Init Error: {e}")
-        return None
-
-def get_ai_step_advice_stream(item, country):
-    model = get_gemini_model()
-    if not model:
-        yield "⚠️ AI 未啟用 (請設定 API Key)"
-        return
-    try:
-        prompt = f"""
-        使用者正在 {country} 旅遊。
-        當下行程：{item['title']} (地點: {item['loc']})
-        備註：{item['note']}
-        請提供約 100 字的簡短建議(注意事項、看點或美食)。
-        """
-        response = model.generate_content(prompt, stream=True)
-        for chunk in response:
-            if chunk.text: yield chunk.text
-    except Exception as e:
-        err_msg = str(e)
-        if "404" in err_msg: yield "⚠️ 錯誤 404：找不到模型。"
-        else: yield f"連線錯誤: {err_msg}"
-
-def parse_wishlist_text(raw_text):
-    model = get_gemini_model()
-    if not model: return None
-    try:
-        prompt = f"""
-        請分析以下文字（可能是 Google Maps 分享連結、Tabelog 店名、或一段網誌介紹），提取出旅遊景點資訊。
-        文字內容：{raw_text}
-        
-        請回傳一個 JSON 物件 (Object)，包含以下欄位：
-        - title: 景點或餐廳名稱
-        - loc: 地址或大概區域 (如果沒有，留空)
-        - note: 簡短的描述或評價 (從文字中摘要)
-        
-        只回傳 JSON，不要有 Markdown。
-        """
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
-    except Exception as e:
-        print(f"Wishlist Parse Error: {e}")
-        return None
 
 def analyze_receipt_image(image_file):
     model = get_gemini_model()
