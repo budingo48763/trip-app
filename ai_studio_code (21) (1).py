@@ -348,9 +348,55 @@ header[data-testid="stHeader"] {{ height: 0 !important; background: transparent 
 /* AI Box */
 .ai-box {{ background: #F0F8FF; border: 1px solid #BEE3F8; border-radius: 12px; padding: 15px; color: #2C5282; }}
 
-/* General Overrides */
-div[data-testid="stRadio"] > div {{ background-color: {c_sec} !important; border-radius: 12px !important; }}
-div[data-testid="stRadio"] label[data-checked="true"] {{ background-color: {c_card} !important; color: {c_text} !important; font-weight: bold !important; }}
+/* --- [修正] 膠囊式按鈕 (Pills) 樣式覆蓋 --- */
+div[data-testid="stRadio"] > div {{
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 5px;
+    background-color: transparent !important;
+}}
+
+/* 隱藏預設的圓點 */
+div[data-testid="stRadio"] label > div:first-child {{
+    display: none;
+}}
+
+/* 膠囊按鈕本體 */
+div[data-testid="stRadio"] label {{
+    background-color: {c_card} !important;
+    border: 1px solid {c_sec} !important;
+    padding: 6px 16px !important;
+    border-radius: 20px !important;
+    margin-right: 0px !important;
+    transition: all 0.2s;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}}
+
+/* 滑鼠懸停效果 */
+div[data-testid="stRadio"] label:hover {{
+    border-color: {c_primary} !important;
+    opacity: 0.9;
+}}
+
+/* 選中狀態 */
+div[data-testid="stRadio"] label[data-checked="true"] {{
+    background-color: {c_primary} !important;
+    border-color: {c_primary} !important;
+}}
+
+/* 選中狀態的文字顏色 (強制反白) */
+div[data-testid="stRadio"] label[data-checked="true"] p {{
+    color: #FFFFFF !important;
+    font-weight: bold !important;
+}}
+
+/* 未選中狀態的文字顏色 */
+div[data-testid="stRadio"] label[data-checked="false"] p {{
+    color: {c_sub} !important;
+}}
 
 /* Custom Apple Card for Itinerary */
 .apple-card {{
